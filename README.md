@@ -1,1 +1,0 @@
-⚠️ This project is non-commercial. You may not sell or profit from this game or its assets.
