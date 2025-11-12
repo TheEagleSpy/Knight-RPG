@@ -1,21 +1,20 @@
 import random
 import time
 
-# Utility function to print text with a delay
-def Print(text, delay=0.02):
+def Print(text, delay=0.02): #0.02
     for char in text:
         print(char, end='', flush=True)
         time.sleep(delay)
     print()
-
+    
 # Shows known player and villager cards
-def show_cards(player_cards, villager_cards, target_score, inventory):
+def show_cards(player_cards, villager_cards, target_score, inventory, enemy_name):
     Print("\n----- Cards -----")
     print(f"Your Cards: {', '.join(map(str, player_cards))} (Total: {sum(player_cards)})")
     
     # Calculate total of revealed villager cards
     revealed_villager_total = sum(villager_cards[1:])
-    print(f"Villager's Cards: {', '.join(['??'] + [str(card) for card in villager_cards[1:]])} (Total: {revealed_villager_total})")
+    print(f"{enemy_name}'s Cards: {', '.join(['??'] + [str(card) for card in villager_cards[1:]])} (Total: {revealed_villager_total})")
     
     print(f"\nTarget Score: {target_score}")
     print(f"Your Trump Cards: {', '.join(inventory) if inventory else 'None'}")
@@ -50,8 +49,8 @@ def draw_trump_cards():
     return random.sample(trump_cards, 2)
 
 # Main game function
-def play_21():
-    Print("-----Welcome to the 21 Minigame Test!-----\n")
+def play_21(player_data, gold_bet, enemy_name, difficulty):
+    Print("-----Welcome to the 21 Minigame-----\n")
     Print("\n-----21 Game-----")
     # Initialize scores
     player_wins = 0
@@ -84,7 +83,7 @@ def play_21():
 
         Print("\n-----Drawing Hidden Card-----")
         Print(f"\nYou draw your hidden card: {player_cards[0]}")
-        Print(f"\nThe villager draws their hidden card: ??")
+        Print(f"\nThe {enemy_name} draws their hidden card: ??")
 
         player_stands = False
         villager_stands = False
@@ -114,7 +113,7 @@ def play_21():
                     player_stands = True
 
                 elif choice == "3":
-                    show_cards(player_cards, villager_cards, target_score, player_trump_cards)
+                    show_cards(player_cards, villager_cards, target_score, player_trump_cards, enemy_name)
                     continue
                 
                 elif choice == "4":
@@ -131,18 +130,18 @@ def play_21():
                         new_card = random.choice(available_cards)
                         villager_cards.append(new_card)
                         available_cards.remove(new_card)
-                        Print(f"The villager draws a {new_card}!")
+                        Print(f"The {enemy_name} draws a {new_card}!")
                         player_stands = False
                     else:
                         Print("No more cards available in the deck!")
                 else:
-                    Print("\nThe villager stands.")
+                    Print(f"\nThe {enemy_name} stands.")
                     villager_stands = True
 
         # Show final hands
         Print("\nFinal hands:")
         Print(f"Your Cards: {', '.join(map(str, player_cards))} (Total: {sum(player_cards)})")
-        Print(f"Villager's Cards: {', '.join(map(str, villager_cards))} (Total: {sum(villager_cards)})")
+        Print(f"{enemy_name} Cards: {', '.join(map(str, villager_cards))} (Total: {sum(villager_cards)})")
 
         # Determine the winner of the round
         player_total = sum(player_cards)
@@ -155,7 +154,7 @@ def play_21():
                 player_wins += 1
                 
             elif abs(villager_total - target_score) < abs(player_total - target_score):
-                Print("You were both over but the villager was closer to the target score! They win!")
+                Print(f"You were both over but the {enemy_name} was closer to the target score! They win!")
                 villager_wins += 1
                 
             else:
@@ -163,11 +162,11 @@ def play_21():
 
         # One over the target score
         elif player_total > target_score:
-            Print("You went over! The villager wins this round.")
+            Print(f"You went over! The {enemy_name} wins this round.")
             villager_wins += 1
             
         elif villager_total > target_score:
-            Print("The villager went over! You win this round.")
+            Print(f"The {enemy_name} went over! You win this round.")
             player_wins += 1
 
         # Exact target score
@@ -176,7 +175,7 @@ def play_21():
             player_wins += 1
             
         elif villager_total == target_score:
-            Print(f"The villager got exactly {target_score} and won!")
+            Print(f"The {enemy_name} got exactly {target_score} and won!")
             villager_wins += 1
 
         # Both under the target score
@@ -187,7 +186,7 @@ def play_21():
                 player_wins += 1
                 
             elif abs(target_score - villager_total) < abs(target_score - player_total):
-                Print(f"The villager was closer to {target_score} and won!")
+                Print(f"The {enemy_name} was closer to {target_score} and won!")
                 villager_wins += 1
                 
             else:
@@ -200,25 +199,29 @@ def play_21():
         # Restarts game if there is a score error
         else:
             Print("An error has occured and the game is restarting")
-            play_21()
+            play_21(player_data, gold_bet, enemy_name, difficulty)
             
             
         # Show current score
-        Print(f"Score: You {player_wins} - {villager_wins} Villager\n")
+        Print(f"Score: You {player_wins} - {villager_wins} {enemy_name}\n")
 
     # End of game
     Print("Game Over!")
     if player_wins > villager_wins:
         Print("Congratulations! You win the best of 5!")
-        action = input("Do you want to play again?\n\n[1] Yes\n[2] No Thanks\nEnter: ")
-        if action == '1':
-            play_21()
-        elif action == '2':
-            Print("\n-----Town----")
+        Print("Exiting...\n")
+        time.sleep(1)
     else:
-        Print("The villager wins the best of 5. Better luck next time!")
+        Print(f"The {enemy_name} wins the best of 5. Better luck next time!")
+        Print("Exiting...\n")
+        time.sleep(1)
         Print("-----Main Game-----")
 
 # Start the game
 if __name__ == "__main__":
-    play_21()
+    # Example player data and settings
+    player_data = {"gold": 100}
+    gold_bet = 10
+    enemy_name = "Test enemy"
+    difficulty = input("Enter difficulty: ").strip()
+    play_21(player_data, gold_bet, enemy_name, difficulty)
