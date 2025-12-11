@@ -3,18 +3,23 @@ import time
 import random
 import sys
 import os
+import traceback
+from datetime import datetime
 
 # Mechanics
-from data_save_load import save_all, load_all, view_game_stats
-from inventory import inventory_display, get_equipped_weapon_damage
+from data_save_load import *
+from inventory import *
+from klare_villager_dialogue import talk_to_villagers, reset_villagers_talked
+from updatelog import updatelog
 from printdelay import Print, PRint
 from tips import display_random_tip
 
 # Minigames
-from twentyone import play_21
-from higherlower import play_higherlower
-from rps import start_rps
-from dungeons import dungeons
+from minigames.twentyone import play_21
+from minigames.rps import play_rps
+from minigames.higherlower import play_higherlower
+from minigames.memory import play_memory
+from minigames.liarsdice import play_liars_dice
 from geniewish import geniewish
 
 # Colours
@@ -22,10 +27,15 @@ RED = "\033[91m"
 BLUE = "\033[94m"
 GREEN = "\033[92m"
 YELLOW = "\033[93m"
+PURPLE = "\033[95m"
 GOLD = "\033[33m"
 SILVER = "\033[37m"
 BLACK = "\033[30m"
 RESET = "\033[0m"
+
+LOG_FILE = "crash_log.txt"
+
+current_slot = None
 
 # Player Actions
 healed_today = True
@@ -34,7 +44,6 @@ upgraded_armour = False
 # Enemies
 
 # -- Forest --
-fight_boss = False
 fight_caveman = False
 fight_campfire_bandit = False
 fight_bandit_outpost = False
@@ -51,10 +60,12 @@ fight_caravan = False
 
 # Game Actions
 
+fight_boss = False
+killed_baron = False
+lost_to_baron = False
+
 # -- Forest --
 viewed_map = False
-encounter_1 = True
-encounter_2 = False
 helped_bob = False
 seen_bob = False
 seen_bounty_hunter = False
@@ -62,15 +73,19 @@ seen_bounty_hunter = False
 # -- Frozen Peaks --
 storm_power = 0
 picked_events_left = 0
+colours_left = 5
+memory_sequence = []
+
+# -- Village of Klare --
+curent_hour = 0
 
 # Makes the game run (dont touch)
 def start_game():
-    # Sets up player data
-    player_data = main_player()
     # Goes to next part of game one the previous is done
     start_prologue(settings)
-    start_story(player_data, settings, game_stats)
-    start_ending()
+    show_save_menu()
+    start_story(player_data, settings, game_stats, klare_data)
+    start_ending(player_data, game_stats)
 
 # Player Stats
 def main_player():
@@ -85,17 +100,29 @@ def main_player():
         "health_potions": 0,
         "armour_equipped": 'No Armour',
         "weapon_equipped": 'Bronze Sword',
-        "crit_chance": 2,
+        "crit_chance": 9,
         "owned_weapons": ["Bronze Sword"],
         "owned_armour": ["No Armour"],
         "companions": 0,
         "slime_kingdom": False,
+        "beaten_game": False,
+        "debugging": False,
     }
     return player_data
+
+# Sets up player data
+player_data = main_player()
 
 # Display player stats
 def stat_display(player_data):
     os.system('cls') # Clear CMD
+    if player_data['day'] == 14 and player_data['location'] == "Forest":
+        Print("**At the end of this exploration is the Howler fight, use this day to heal, buy weapons and anything else**\n")
+    if player_data['day'] == 29 and player_data['location'] == "Frozen Peaks":
+        Print("**At the end of this exploration is the Bigfoot fight, use this day to heal, buy weapons and anything else**\n")
+    elif player_data['day'] == 44 and player_data['location'] == "Village of Klare":
+        Print("**When the bell rings at the end of this exploration you will fight the dragon, make sure to SPEND ALL YOUR GOLD on the merchant**\n")
+
     print("-----Character Stats-----")
     print(f"Health: {player_data['health']}/{player_data['max_health']}")
     print(f"Strength: {player_data['strength']}")
@@ -104,28 +131,60 @@ def stat_display(player_data):
     print(f"Day: {player_data['day']}")
     print(f"Location: {player_data['location']}")
     print(f"Weapon: {player_data['weapon_equipped']}")
+    print(f"Crit Chance: {player_data['crit_chance']}")
     print(f"Companions: {player_data['companions']}")
     print("\n-------------------------------------------------------------------------")
+
+# Klare specific settings
+def klare_data():
+    klare_data = {
+        "day_pass": False, # Single day pass
+        "basic_pass": False, # Lifetime pass for basic area
+        "premium_pass": False, # Lifetime pass for elite area
+
+        "easy_beaten": [], # Name of each easy enemy beaten
+        "medium_beaten": [], # Name of each medium enemy beaten
+        "hard_beaten": [], # Name of each hard enemy beaten
+    }
+    return klare_data
+
+klare_data = klare_data()
 
 # Weapons Data
 def weapons():
     weapons_data = [
+
         # Swords
         {"name": "Bronze Sword", "damage": 8, "crit_chance": 9, "special": "None"},
-        {"name": "Iron Sword", "damage": 21, "crit_chance": 14, "special": "None"},
-        {"name": "Steel Sword", "damage": 43, "crit_chance": 23, "special": "None"},
+        {"name": "Shiny Sword", "damage": 16, "crit_chance": 9, "special": "None"},
+        {"name": "Iron Sword", "damage": 17, "crit_chance": 14, "special": "None"},
+        {"name": "Steel Sword", "damage": 35, "crit_chance": 23, "special": "None"},
+        
         {"name": "Flame Sword", "damage": 63, "crit_chance": 28, "special": "None"},
         {"name": "Frost Sword", "damage": 85, "crit_chance": 11, "special": "None"},
-        {"name": "Shadow Blade", "damage": 145, "crit_chance": 25, "special": "Life Steal 1"},
+        
+        {"name": "Mythical Blade", "damage": 39, "crit_chance": 0, "special": "Strength 3"},
+        {"name": "Shadow Blade", "damage": 125, "crit_chance": 25, "special": "Life Steal 1"},
+        
         {"name": "Dragon Blade", "damage": 450, "crit_chance": 0, "special": "None"},
+
         # Bows
         {"name": "Hunting Bow", "damage": 16, "crit_chance": 5, "special": "None"},
         {"name": "Elven Bow", "damage": 22, "crit_chance": 11, "special": "None"},
+        
         {"name": "Compound Bow", "damage": 58, "crit_chance": 17, "special": "None"},
+
+        {"name": "Composite Bow", "damage": 70, "crit_chance": 15, "special": "None"},
+        
         {"name": "Dragon Bow", "damage": 130, "crit_chance": 0, "special": "None"},
-        # Spears
+
+        # Spears    
         {"name": "Wooden Spear", "damage": 12, "crit_chance": 80, "special": "None"},
-        {"name": "Eagle Spear", "damage": 35, "crit_chance": 80, "special": "None"},
+
+        {"name": "Eagle Spear", "damage": 45, "crit_chance": 80, "special": "None"},
+
+        {"name": "Rock Spear", "damage": 70, "crit_chance": 80, "special": "None"},
+        {"name": "Baron's Spear", "damage": 90, "crit_chance": 80, "special": "None"},
     ]
     return weapons_data
 
@@ -135,14 +194,19 @@ weapons_data = weapons()
 # Defence of armour
 def armour():
     armour_data = [
+
         # Armour
         {"name": "No Armour", "defence": 0},
         {"name": "Cloth Armour", "defence": 4},
         {"name": "Iron Armour", "defence": 10},
+
         {"name": "Yeti Armour", "defence": 19},
-        {"name": "Titanium Armour", "defence": 31},
+        {"name": "Titanium Armour", "defence": 26},
+
         {"name": "Adamantium Armour", "defence": 40},
+        {"name": "Ash Armour", "defence": 44},
         {"name": "Dragonite Armour", "defence": 55},
+
         {"name": "Dragon Armour", "defence": 70},
     ]
     return armour_data
@@ -186,23 +250,59 @@ def random_enchant(player_data, weapons_data):
 
 # Variable containing all the game stats
 game_stats = {
-    "games_played": 0,
+    "games_opened": 0,
+    "times_rested": 0,
     "bosses_killed": 0,
     "enemies_killed": 0,
-    "battles_won": 0,
-    "battles_lost": 0,
     "total_damage_dealt": 0,
+    "gold_earned": 0,
     "critical_hits": 0,
-    "times_dodged": 0,
-    "health_potions_used": 0,
+    "battles_lost": 0,
     "days_survived": 0,
     "items_bought": 0,
+    "times_dodged": 0,
+    "health_potions_used": 0,
     "minigames_played": 0,
     "gambles_won": 0,
     "gambles_lost": 0,
-    "times_rested": 0,
     "good_events": 0,
     "bad_events": 0,
+    }
+
+# Variable containing all the achievements
+achievements = {
+
+    # Non cool achievements
+    "Monster Slayer I": 0/50,
+    "Monster Slayer II": 0/100,
+    "Monster Slayer III": 0/200, # kill 200 enemies
+    "Survivor I": 0/25,
+    "Survivor II": 0/99, # survive 99 events
+    "Health Hoarder": 0/300, # have 300 max health
+
+    # do something cool for the achievement
+    "Early Exit I": False, # leaving the forest early (before day 15)
+    "Early Exit II": False, # leaving the frozen peaks early (before day 30)
+    "Early Exit III": False, # leaving the village of klare early (before day 45)
+    "Merchant Rock Paper Scissors": False, # typing rps into the merchant
+    "Hey I found the castle": False, # bob coming back with reward from robbing the castle
+    "I am #1": 0/20, # beating every enemy in Klare
+    "Dragon Slayer": False, # killing the dragon
+    "Bug Mode": False, # activate debug mode
+    "You and what army?": 0/5, # have 5 companions at once in a single run
+    "Hermit Listener": 0/2, # listen to both hermits entire story (forest and snow)
+    "Sword Collector": 0/7, # Own every type of sword
+    "Bow Collector": 0/4, # Own every type of bow
+    "Spear Collector": 0/2, # Own every type of Spear
+    "Ultimate Collecter": 0/13, # Own every weapon in the game at once
+    "Money Saver": False, # Purchase from the blacksmith
+    "Memory Master": False, # Win the memory game
+    "Enchanted": False, # Enchanting a weapon for the first time
+    "Dodged": False, # Dodge an attack
+    "Light work": False, # Beat an enemy without taking damage
+    "Free Health": False, # Health to full health from lifesteal
+    "Villager Returned": False, # Return the villager to klare
+
     }
 
 # Displays Settings    
@@ -232,8 +332,8 @@ def settings_display(settings):
             else:
                 print("Please Enter a valid input")
 
-            # Write the updated settings to file
-            save_all('savedata.json', settings, game_stats)
+            # Write updated global settings to main file only
+            save_global_data(settings, game_stats)
 
         except ValueError:
             print("Please Enter a valid input")
@@ -241,19 +341,193 @@ def settings_display(settings):
 # List of settings        
 settings = {
     "skip_battles": False,
-    "debugging": False,
     "skip_intro": False,
     "enter_to_continue": True,
-}
+    }
+
+# -- Save data stuff -- #
 
 # Sets the game settings as the saved settings
-settings, game_stats = load_all('savedata.json')
+settings, game_stats = load_global_data()
+player_data, klare_data, world_state = {}, {}, {}
 
-# Saves the settings to a JSON file
-save_data = {key: f"{key} = {value}" for key, value in settings.items()}
+# Apply all world_state keys back into globals
+apply_world_state_to_globals(world_state, globals())
+
+# Pick and load slot
+def show_save_menu():
+    while True:
+        os.system('cls')  # Clear CMD
+        slots = list_save_slots()
+        print("---- SAVE SLOTS ----")
+        for s in slots:
+            if s["exists"]:
+                meta = s["meta"]
+                print(f"[{s['slot']}] Day {meta.get('day', '?')} | "
+                      f"Location: {meta.get('location', 'Forest')} | "
+                      f"Last Load: {meta.get('last_played', 'N/A')}")
+            else:
+                print(f"[{s['slot']}] Empty Slot")
+                
+        print("[r] Exit Game")
+        print("--------------------")
+
+
+        choice = input("\nSelect slot (1–3) or 'r' to quit: ").strip().lower()
+
+        if choice == "r":
+            sys.exit()
+
+        # enter debug slot
+        if choice == "debug":
+            return load_debug_slot_and_apply()
+
+        try:
+            slot_num = int(choice)
+            if not (1 <= slot_num <= 3):
+                print("Please enter 1-3")
+                continue
+        except ValueError:
+            print("Please enter a valid input")
+            continue
+
+        if slot_actions_menu(slot_num):
+            break
+
+# Slot options
+def slot_actions_menu(slot_num):
+    os.system('cls')  # Clear CMD
+    slots = list_save_slots()
+    slot_info = next((s for s in slots if s["slot"] == slot_num), None)
+
+    if not slot_info:
+        print("Invalid slot.")
+        return False
+
+    exists = slot_info["exists"]
+    print("---- SLOT MENU ----")
+    if exists:
+        meta = slot_info["meta"]
+        print(f"Slot {slot_num}: Day {meta.get('day', '?')} | "
+              f"{meta.get('location', 'Forest')} | "
+              f"Last Played: {meta.get('last_played', 'N/A')}")
+        print("--------------------")
+        print("[1] Load Game")
+        print("[2] Delete Save")
+        print("[3] Back")
+    else:
+        print(f"Slot {slot_num}: Empty")
+        print("--------------------")
+        print("[1] New Game")
+        print("[2] Back")
+
+    action = input("Enter: ").strip().lower()
+
+    if exists:
+        if action == "1":
+            return load_slot_and_apply(slot_num)  # Return True if loaded successfully
+        elif action == "2":
+            delete_game(slot_num)
+        elif action == "3":
+            return False
+        else:
+            print("Invalid option.")
+    else:
+        if action == "1":
+            new_game(slot_num)
+            return load_slot_and_apply(slot_num)
+        elif action == "2":
+            return False
+        else:
+            print("Invalid option.")
+    return False
+
+# Creates a new save
+def new_game(slot_num):
+    global current_slot, player_data, klare_data, world_state
+    current_slot = slot_num
+
+    # Load fresh default values for a new save
+    defaults = get_default_values()
+    player_data = defaults["player_data"].copy()
+    klare_data = defaults["klare_data"].copy()
+    world_state = defaults["world_state"].copy()
+
+    # Save both global and slot data
+    save_slot(current_slot, player_data, klare_data, weapons_data, armour_data, world_state)
+    save_global_data(settings, game_stats)
+
+    print(f"\nNew game created in slot {current_slot}.")
+
+# Loads save and starts game
+def load_slot_and_apply(slot_num):
+    global current_slot, player_data, klare_data, world_state
+    current_slot = slot_num
+
+    data = load_slot(slot_num)
+    if not data:
+        print("No save found in that slot.")
+        return False
+
+    # --- Reassign loaded data to globals ---
+    player_data = data["player_data"]
+    klare_data = data["klare_data"]
+    weapons_data = data['weapons_data']
+    armour_data = data['armour_data']
+    world_state = data["world_state"]
+
+    return True  # Breaks out of save menu and enters the game
+
+# Loads debug save and starts game
+def load_debug_slot_and_apply():
+    global current_slot, player_data, klare_data, world_state
+    current_slot = "debug"
+
+    defaults = get_default_values()
+    path = get_slot_path("debug")
+
+    # If file doesn't exist, create a fresh debug save
+    if not os.path.exists(path):
+        player_data = defaults["player_data"].copy()
+        klare_data = defaults["klare_data"].copy()
+        weapons_data = defaults['weapons_data'].copy()
+        armour_data = defaults['armour_data'].copy()
+        world_state = defaults["world_state"].copy()
+
+        # Enable debugging for this save
+        player_data["debugging"] = True
+        player_data['slime_kingdom'] = True
+        save_slot("debug", player_data, klare_data, weapons_data, armour_data, world_state)
+        print("\nNew debug slot created.")
+    else:
+        # Load and merge existing slot
+        data = load_slot("debug")
+        player_data = data["player_data"]
+        klare_data = data["klare_data"]
+        weapons_data = data['weapons_data']
+        armour_data = data['armour_data']
+        world_state = data["world_state"]
+        player_data["debugging"] = True  # Always force it on when using debug slot
+        print("\nLoaded existing debug slot.")
+
+    # Apply world state and go straight into the game
+    apply_world_state_to_globals(world_state, globals())
+    return True  # Continue into gameplay
+
+# Deletes selected save
+def delete_game(slot_num):
+    os.system('cls')  # Clear CMD
+    confirm = input(f"Confirm delete slot {slot_num}? \n[1] Yes\n[2] No\nEnter: ").lower()
+    if confirm == "1":
+        delete_slot(slot_num)
+        print(f"Slot {slot_num} deleted.")
+    else:
+        print("Delete cancelled.")
+
+# -- Helper Functions -- #
 
 # Uses a health potion if allowed
-def use_health_potion(player_data):
+def use_health_potion(player_data, game_stats):
     possible_health = player_data['max_health'] - player_data['health'] 
     if player_data['location'] == 'Forest':
         health_potion = 50
@@ -261,6 +535,8 @@ def use_health_potion(player_data):
             healed = min(health_potion, possible_health)
             player_data['health'] += healed
             Print(f"You drank the potion and gained {healed} Health")
+
+            game_stats['health_potions_used'] += 1
 
         else:
             Print("You're already at full health.")
@@ -271,6 +547,8 @@ def use_health_potion(player_data):
             healed = min(health_potion, possible_health)
             player_data['health'] += healed
             Print(f"You drank the potion and gained {healed} Health")
+
+            game_stats['health_potions_used'] += 1
 
         else:
             Print("You're already at full health.")
@@ -308,7 +586,21 @@ def random_berry_effect(player_data):
         player_data[stat] -= amount
         check_death(player_data, game_stats)
         return f"decreases your {stat.replace('_', ' ')} by {amount}."
-        
+
+# Function to get weapon by name
+def get_weapon_by_name(name):
+    for weapon in weapons_data:
+        if weapon['name'] == name:
+            return weapon
+    return None
+
+# Function to get armour by name
+def get_armour_by_name(name):
+    for armour in armour_data:
+        if armour['name'] == name:
+            return armour
+    return None
+
 # Slime Kingdom with blacksmith and shop
 def slime_kingdom(player_data):
     os.system('cls')
@@ -317,15 +609,32 @@ def slime_kingdom(player_data):
         action = input("\n---Slime Kingdom---\n[1] Merchant\n[2] Forest Blacksmith\n[r] Leave\nEnter: ")
         if action == '1':
             if player_data['location'] == 'Forest':
-                forest_merchant(player_data, game_stats)
+                forest_merchant(player_data, game_stats, weapons_data, armour_data)
             elif player_data['location'] == 'Frozen Peaks':
-                frozen_peaks_merchant(player_data, game_stats)
+                frozen_peaks_merchant(player_data, game_stats, weapons_data, armour_data)
         elif action == '2':
             forest_blacksmith(player_data, weapons_data, armour_data, game_stats)
         elif action == 'r':
             break
         else:
             Print("Please Enter a valid input")
+
+# For the gold earned stat
+def track_gold_earned(player_data, before_gold, game_stats):
+    after_gold = player_data['gold']
+    delta = after_gold - before_gold
+
+    # Only track positive gains
+    if delta > 0:
+        game_stats['gold_earned'] += delta
+
+# idk
+def advance_time(current_hour, current_minute, minutes):
+    current_minute += minutes
+    while current_minute >= 60:
+        current_minute -= 60
+        current_hour += 1
+    return current_hour, current_minute
 
 # -- Forest -- #
 
@@ -361,7 +670,7 @@ def enemy_data_forest():
     campfire_bandit = {"name": "Bandit", "health": 40, "strength": 7, "gold": 30}
     ghost = {"name": "Ghost", "health": 50, "strength": 8, "gold": 0}
     merchant = {"name": "Merchant", "health": 100, "strength": 3, "gold": 125}
-    black_knight = {"name": "Black Knight", "health": 150, "strength": 11, "gold": 0}
+    black_knight = {"name": "Black Knight", "health": 120, "strength": 11, "gold": 0}
     endless_road_skeleton = {"name": "Old Skeleton", "health": 21, "strength": 6, "gold": 5}
     bandit_leader = {"name": "Bandit Leader", "health": 75, "strength": 11, "gold": 85}
     villager = {"name": "Villager", "health": 35, "strength": 6, "gold": 0}
@@ -447,11 +756,14 @@ def enemy_data_forest():
 # Player explores forest
 def explore_forest(player_data, weapons_data, game_stats):
     global viewed_map,fight_boss, fight_caveman, fight_campfire_bandit, fight_ghost, helped_bob, seen_bob, seen_bounty_hunter, upgraded_armour, fight_merchant, fight_black_knight, fight_endless_road_skeleton, fight_bandit_leader, fight_villager
-    exploration_time = random.randint(3, 6) # How many events the player in encounter
+    exploration_time = random.randint(3, 6) # How many events the player will encounter
     
     while True:
         if exploration_time > 0:
-            if settings['debugging'] == False:
+
+            before_gold = player_data['gold']
+
+            if player_data['debugging'] == False:
                 exploration = random.random()
 
             else:
@@ -466,18 +778,20 @@ def explore_forest(player_data, weapons_data, game_stats):
             elif player_data['day'] == 11 and exploration_time == 3:
                 exploration = 1
 
-            # Random Events
+            elif player_data['day'] == 14 and exploration_time == 1:
+                exploration = 1
+
             # Main Exploration
             if exploration <= 0.50:
                 
                 Print(f"\n{GREEN}-----Wilderness Exploration-----{RESET}")
-                if settings['debugging'] == False:
+                if player_data['debugging'] == False:
                     random_event = random.random()
                     
                 else: # if player enables debug they can change the event
                     try:
                         print("0.05 Cave, 0.10 House, 0.15 Sunny Field, 0.20 Elf, 0.25 Campsite, 0.30 Animal Attack, 0.35 Strength Plant, 0.40 Lost Villager, 0.45 Endless Road, 0.50 Bandit Outpost")
-                        print("0.55 Catapiller Queen, 0.60 Encounter Bob, 0.65 Bounty Hunters, 0.70 Dark Witch, 0.75 Friendly Enemy, 0.80 Gotten Lost, 0.85 Berries, 0.90 Slime Kingdom, 0.95 Blacksmith, 1 Nothing")
+                        print("0.55 Catapiller Queen, 0.60 Encounter Bob, 0.65 Bounty Hunters, 0.70 Dark Witch, 0.75 Friendly Enemy, 0.80 Gotten Lost, 0.85 Berries, 0.90 Slime Kingdom, 0.95 Blacksmith, 1 Stuck Sword")
                         random_event = float(input("Exploration value: "))
                     except ValueError:
                         random_event = random.random()
@@ -488,7 +802,7 @@ def explore_forest(player_data, weapons_data, game_stats):
                     cave_event = random.random()
                     
                     if cave_event <= 0.25:
-                        Print("[\nKnight] Eww it stinks in here, wait, is that?")
+                        Print("[Knight] Eww it stinks in here, wait, is that?")
                         time.sleep(2)
                         Print("\nYou see a half eaten human corspe and leave immediately")
                         
@@ -532,7 +846,7 @@ def explore_forest(player_data, weapons_data, game_stats):
 
                                 else:
                                     Print("[Knight] I sure do love me some water")
-                                    Print("+10 Health")
+                                    Print("\n+10 Health")
                                     player_data['health'] += 10
 
                                     # Increase stat of good events by 1
@@ -615,6 +929,7 @@ def explore_forest(player_data, weapons_data, game_stats):
                                 else:
                                     Print("Suddenly you fall into the floor getting your foot stuck\n-5 Health")
                                     player_data['health'] -= 5
+                                    check_death(player_data, game_stats)
 
                                     # Increase stat of bad events by 1
                                     game_stats['bad_events'] += 1
@@ -636,7 +951,7 @@ def explore_forest(player_data, weapons_data, game_stats):
                             break
                     
                 elif random_event <= 0.15: # Plant Event
-                    Print("You come across a flower field and the sun starts shining\n+5 Max Health\n+10 Health\n+1 Strength\n+1 Weapon Damage\n+1 Armour Toughness\n+20 Gold")
+                    Print("You come across a flower field and the sun starts shining\n+5 Max Health\n+10 Health\n+1 Strength\n+1 Weapon Damage\n+1 Armour Defence\n+20 Gold")
                     player_data['max_health'] += 5
                     player_data['health'] += 10
                     player_data['gold'] += 20
@@ -671,21 +986,9 @@ def explore_forest(player_data, weapons_data, game_stats):
                                 Print(f"\n[Kind Elf] Your wish has been granted you now have: {player_data['gold']} Gold!")
                                 break
                             elif action == '2':
-
-                                action = input("\nDo you want to equip the bow right now? It does 11 damage\n[1] Yes\n[2] No\nEnter: ")
-
-                                if action == '1':
-                                    player_data['owned_weapons'].append("Elven Bow")
-                                    player_data['weapon_equipped'] = "Elven Bow"
-                                    Print("\n[Kind Elf] May it serve you well")
-                                    break
-
-                                elif action == '2':
-                                    player_data['owned_weapons'].append("Elven Bow")
-                                    break
-
-                                else:
-                                    Print("\nPlease Enter a valid input, the bow has not been added do your inventory")
+                                player_data['owned_weapons'].append("Elven Bow")
+                                Print("\n[Kind Elf] May it serve you well")
+                                break
 
                             elif action == '3':
                                 player_data['max_health'] += 50
@@ -706,27 +1009,34 @@ def explore_forest(player_data, weapons_data, game_stats):
 
                             elif action == '2':
                                 player_data['owned_weapons'].append("Steel Sword")
-                                player_data['weapon_equipped'] = "Steel Sword"
                                 Print("\n[Kind Elf] Well, here is your new ☆ Steel Sword ☆... Enjoy")
                                 break
 
                             elif action == '3':
                                 Print("\n[Kind Elf] Now you can deal more damage more often!")
-                                for weapon in weapons_data:
-                                    if weapon["name"] == player_data["weapon_equipped"]:  
-                                        weapon["crit_chance"] += 60
-                                        player_data['crit_chance'] += 60
+
+                                # Find equipped weapon
+                                equipped_weapon = None
+                                for w in weapons_data:
+                                    if w["name"] == player_data["weapon_equipped"]:
+                                        equipped_weapon = w
                                         break
+
+                                if equipped_weapon:
+                                    # Apply crit buff to the weapon itself
+                                    equipped_weapon["crit_chance"] = 60
+
+                                    # Re-equip to recalc crit correctly via your existing function
+                                    view_weapon_stats(player_data, equipped_weapon, weapons_data)
+
                                 break
 
-                            else:
-                                Print("\nPlease Enter a valid input")
 
                     else:
                         while True:
                             action = input(f"[1] +3 Weapon Damage\n[2] +125 Gold\n[3] Set Max Health between 75 and 165\nEnter: ")
                             if action == '1':
-                                Print("\nYour Sword's blade shines against the sun")
+                                Print("\nYour Sword's blade shines against the sun\n+3 Weapon Damage")
                                 for weapon in weapons_data:
                                     if weapon["name"] == player_data["weapon_equipped"]:  
                                         weapon["damage"] += 3
@@ -775,7 +1085,7 @@ def explore_forest(player_data, weapons_data, game_stats):
                             elif campsite_event < 0.7:
                                 for armour in armour_data:
                                     if armour['name'] == player_data['armour_equipped']:
-                                        Print("You found an old piece of wood that you stick to your armour for extra defence\n+1 Defence")
+                                        Print("You found an old piece of wood that you stick to your armour for extra defence\n+1 Armour Defence")
                                         armour['defence'] += 1
                                         player_data['defence'] += 1
                                         break
@@ -818,7 +1128,7 @@ def explore_forest(player_data, weapons_data, game_stats):
                             break
                         
                         elif action == "3":
-                            Print("You decide to leave the campsite alone. Better safe than sorry.")
+                            Print("\nYou decide to leave the campsite alone. Better safe than sorry.")
                             
                             break
                         else:
@@ -851,7 +1161,7 @@ def explore_forest(player_data, weapons_data, game_stats):
                     Print("You encounter a lost looking villager on the side of the path")
 
                     while True:
-                        action = input("\n[Knight] Should I go and investigate?\n\n[1] Walk up to him\n[2] Walk the other way\nEnter: ")
+                        action = input("\n[Knight] Should I go and investigate?\n\n[1] Walk up to him\n[2] Turn and walk the other way\nEnter: ")
 
                         if action == "1":
                             Print("\nYou cautiously approach the villager, who notices you and looks relieved.")
@@ -865,11 +1175,11 @@ def explore_forest(player_data, weapons_data, game_stats):
                                 outcome = random.random()
 
                                 if outcome < 0.3:
-                                    Print("The villager bursts into tears and hands you a family heirloom, insisting you keep it for protection.\n+2 Defence")
+                                    Print("\nThe villager bursts into tears and hands you a family heirloom, insisting you keep it for protection.\n+2 Defence")
                                     player_data['defence'] += 2
                                 elif outcome < 0.6:
-                                    Print("The villager gives you some money and says to meet him back here if you ever find his family.\n+25 Gold")
-                                    player_data['gold'] += 25
+                                    Print("\nThe villager gives you some money and says to meet him back here if you ever find his family.\n+45 Gold")
+                                    player_data['gold'] += 45
                                 else:
                                     Print("[Villager] May I please come with you on your adventure as word is that you are going to travel through the village or Klare.")
                                     Print("\n[Knight] Yes, you may... as long as you help me")
@@ -897,10 +1207,12 @@ def explore_forest(player_data, weapons_data, game_stats):
 
                                 break
                             else:
-                                Print("Please Enter a valid input")
+                                Print("\nPlease Enter a valid input")
+
                         elif action == '2':
                             Print("\nYou head the other way as he aimlessly stumbles around")
                             break
+
                         else:
                             Print("\nPlease Enter a valid input")
                         
@@ -917,7 +1229,8 @@ def explore_forest(player_data, weapons_data, game_stats):
                             escape_chance = 100
 
                         # Escape once escape chance hits 100
-                        Print(f"\n---You are currently {escape_chance}% of the way escaped from the road---\n")
+                        Print(f"\n---You are currently {escape_chance}% of the way escaped from the road---")
+                        print(f"--You have {player_data['health']} Health Left--\n")
                         if escape_chance >= 100:
                             Print("You found the way out! Congratulations!\n+125 Gold")
                             player_data['gold'] += 125
@@ -936,7 +1249,7 @@ def explore_forest(player_data, weapons_data, game_stats):
                                     if viewed_map:
                                         Print("\nAfter following the directions on the map you make your way off the road!")
                                         escape_chance = 100     
-                                    Print("You encounter a strange glowing crystal. It hums with energy.\n+1 Strength\n-1 Defence")
+                                    Print("\nYou encounter a strange glowing crystal. It hums with energy.\n+1 Strength\n-1 Armour Defence")
                                     player_data['strength'] += 1
                                     for armour in armour_data:
                                         if armour['name'] == player_data['armour_equipped']:
@@ -946,16 +1259,16 @@ def explore_forest(player_data, weapons_data, game_stats):
                                     break
 
                                 elif action == '2':
-                                    Print("A dense fog surrounds you, and you hear whispers from all around.\n-10 Health")
-                                    player_data['health'] -= 10
-                                    escape_chance -= 5
+                                    Print("\nA dense fog surrounds you, and you hear whispers from all around.\n-5 Health")
+                                    player_data['health'] -= 5
+                                    check_death(player_data, game_stats)
                                     break
 
                                 elif action == '3':
                                     random_event = random.random()
                                     
                                     if random_event <= 0.10:
-                                        Print("You fall into a hole with a clock which takes you back to Day 1 with all your stats and past decisions with extra defence and strength\nDay = 1\n+3 Strength\n+3 Defence")
+                                        Print("\nYou fall into a hole with a clock which takes you back to Day 1 with all your stats and past decisions with extra defence and strength\nDay = 1\n+3 Strength\n+3 Defence")
                                         time.sleep(2)
                                         player_data['day'] = 1
                                         exploration_time = 0
@@ -965,12 +1278,12 @@ def explore_forest(player_data, weapons_data, game_stats):
                                         player_data['health'] += 10
                                     
                                     elif random_event <= 0.35:
-                                        Print("You Brush past the bushes and find...")
+                                        Print("\nYou Brush past the bushes and find...")
                                         time.sleep(2)
                                         Print("Absolutely nothing")
                                         
                                     elif random_event:
-                                        Print("You Brush past the bushes and find...")
+                                        Print("\nYou Brush past the bushes and find...")
                                         time.sleep(2)
                                         Print("A skeleton that gets up and attacks you!")
                                         fight_endless_road_skeleton = True
@@ -979,8 +1292,8 @@ def explore_forest(player_data, weapons_data, game_stats):
                                         check_death(player_data, game_stats)
                                     break
                                 else:
-                                    Print("You are unsure, so you spin in a circle and walk forward")
-                                    action = '2'
+                                    Print("\nYou are unsure, so you spin in a circle and walk forward")
+                                    action = random.randint(1,3)
 
                         elif road_luck <= 0.25:  # Abandoned Camp
                             Print("You stumble across an abandoned campsite.")
@@ -1000,45 +1313,44 @@ def explore_forest(player_data, weapons_data, game_stats):
                         elif road_luck <= 0.35:  # Hermit Event
                             Print("You come across a Hermit sitting by a fire next to the path.")
                             while True:
-                                action = input("What do you do?\n\n[1] Hear his story\n[2] Skip the story\n[3] Ignore him\nEnter: ")
+                                action = input("What do you do?\n\n[1] Hear his story (1~ minute)\n[2] Skip the story\n[3] Ignore him\nEnter: ")
                                 if action == '1':
-                                    PRint("[Hermit] Another wanderer, lost in the endless road. Sit. Listen.")
+                                    PRint("\n[Hermit] Another wanderer, lost in the endless road. Sit. Listen.")
                                     time.sleep(2)
-                                    PRint("[Knight] What is it you want, hermit?")
+                                    PRint("\n[Knight] What is it you want, hermit?")
                                     time.sleep(2)
-                                    PRint("[Hermit] I once walked as you do, blade in hand, fire in my heart. Until... I hunted the Howler.")
-                                    PRint("[Knight] The Howler? That's just a myth.")
+                                    PRint("\n[Hermit] I once walked as you do, blade in hand, fire in my heart. Until... I hunted the Howler.")
+                                    PRint("\n[Knight] The Howler? That's just a myth.")
                                     time.sleep(1)
-                                    PRint("[Hermit] That's what I thought... until I heard it's cry in the dead of night. A sound that tears through you, a wail that breaks the mind. And then I saw it.")
+                                    PRint("\n[Hermit] That's what I thought... until I heard it's cry in the dead of night. A sound that tears through you, a wail that breaks the mind. And then I saw it.")
                                     time.sleep(7)
                                     PRint("\nThe Hermit's voice breaks, his eyes hollow as if reliving the moment.\n")
                                     time.sleep(3)
                                     PRint("[Hermit] A beast born from nightmares. Eyes like burning coals. A mouth that stretched too wide, too many teeth. Its flesh swallowed my arrows, its skin turned my sword to dust.")
-                                    PRint("[Knight] And how are you here talking to me?")
-                                    PRint("[Hermit] I learned it's secret. It fears itself. The reflection turns it's power inward, shattering its form like brittle glass.")
+                                    PRint("\n[Knight] And how are you here talking to me?")
+                                    PRint("\n[Hermit] I learned it's secret. It fears itself. The reflection turns it's power inward, shattering its form like brittle glass.")
                                     time.sleep(8)
                                     PRint("\nA gust of wind runs through the ruins around you. The fire crackles, and shadows quickly move along the hermit's face.\n")
                                     time.sleep(3)
                                     PRint("[Knight] So you defeated it?")
-                                    PRint("[Hermit] No such victory is ever so easy. I lured it to the stillest pool I could find. It peered into the water, and for the first time, it saw itself. The scream it unleashed—")
+                                    PRint("\n[Hermit] No such victory is ever so easy. I lured it to the stillest pool I could find. It peered into the water, and for the first time, it saw itself. The scream it unleashed—")
                                     time.sleep(2)
                                     PRint("\nThe Hermit grips his sword, knuckles white. His breath turns shallow.\n")
                                     time.sleep(2)
                                     PRint("[Hermit] It was not pain. It was recognition. It saw what it was. What it had become. And for a single, trembling second, it hesitated.")
-                                    PRint("[Knight] And you struck.")
-                                    PRint("[Hermit] I plunged the remaining of my blade into it's heart... I felt it die by my hands. And yet…")
-                                    time.sleep(5)
+                                    PRint("\n[Knight] And you struck.")
+                                    PRint("\n[Hermit] I plunged the remaining of my blade into it's heart... I felt it die by my hands. And yet…")
+                                    time.sleep(4)
                                     PRint("\nThe fire dims.\n")
-                                    time.sleep(4)
+                                    time.sleep(2)
                                     PRint("[Knight] Yet what?")
-                                    PRint("[Hermit] I'm here. I have tried to leave, countless times. But the Howler was no ordinary beast. When I killed it, something took it's place.")
+                                    PRint("\n[Hermit] I'm here... I have tried to leave, countless times. But the Howler was no ordinary beast. When I killed it, something took it's place.")
                                     time.sleep(4)
-                                    PRint("[Knight] What do you mean?")
-                                    PRint("[Hermit] The Howler is not a creature. It is a curse. A hunter must always remain. It watches, waits, and when the path is dark… it returns.")
+                                    PRint("\n[Knight] What do you mean?")
+                                    PRint("\n[Hermit] The Howler is not a creature. It is a curse. A hunter must always remain. It watches, waits, and when the path is dark… it returns.")
                                     time.sleep(3)
-                                    PRint("[Knight] Are you saying—")
-                                    time.sleep(1)
-                                    PRint("[Hermit] One day, you too may hear it's cry. When you do, pray you are ready.")
+                                    PRint("\n[Knight] Are you saying—")
+                                    PRint("\n[Hermit] One day, you too may hear it's cry. When you do, pray you are ready.")
                                     time.sleep(4)
                                     PRint("\nThe Hermit's eyes fill with something unspoken. A weight settles in your chest, but also a fire.")
                             
@@ -1073,8 +1385,8 @@ def explore_forest(player_data, weapons_data, game_stats):
                             while True:
                                 action = input("What do you do?\n\n[1] Wait for the storm to pass\n[2] Push on\nEnter: ")
                                 if action == '1':
-                                    Print("The storm passes, but you feel like you lost precious time.")
-                                    escape_chance -= 10
+                                    Print("\nThe storm passes, but you feel like you lost precious time.")
+                                    escape_chance -= 5
                                     break
                                 elif action == '2':
                                     Print("\nYou brave the storm but emerge exhausted and injured.\n-5 Max Health\n-5 Health")
@@ -1123,7 +1435,7 @@ def explore_forest(player_data, weapons_data, game_stats):
                                     viewed_map = True
                                     break
                                 elif action == '2':
-                                    Print("You ignore the map and continue on.")
+                                    Print("\nYou ignore the map and continue on.")
                                     escape_chance += 15
                                     break
                                 else:
@@ -1134,7 +1446,7 @@ def explore_forest(player_data, weapons_data, game_stats):
                                 action = input("What do you do?\n\n[1] Confront it\n[2] Ignore it\nEnter: ")
                                 if action == '1':
                                     villager_event = random.randint(1, 3)
-                                    if villager_event <= 1:
+                                    if villager_event == 1:
                                         Print("\nThe shadow reveals itself to be a lost villager who is grateful for your help.")
                                         Print("They hand you a small bag of gold.\n+50 Gold")
                                         player_data['gold'] += 50
@@ -1142,8 +1454,8 @@ def explore_forest(player_data, weapons_data, game_stats):
                                         Print("\nThe person begs for food. You give them a berry you found, and they give you a map in return. That tells you to go left")
                                         viewed_map = True
                                     elif villager_event == 3:
-                                        Print("\nAs you step closer, the shadow lunges at you! It's a bandit!\n-20 Health")
-                                        player_data['health'] -= 20
+                                        Print("\nAs you step closer, the shadow lunges at you! It's a bandit!\n-10 Health")
+                                        player_data['health'] -= 10
                                     check_death(player_data, game_stats)
                                     break
                                 elif action == '2':
@@ -1204,7 +1516,7 @@ def explore_forest(player_data, weapons_data, game_stats):
                             elif treasure <= 0.75:
                                 PRint("You open the chest to find a bunch of junk...\n\n-----Items-----\nJunk\nJunk\nJunk\nYou found a health potion!\n+1 Health Potion\nJunk\nYou found a Forest Orb!\n+100 Gold")
                                 Print("\n[Knight] Ooh a Forest Orb")
-                                Print("The Forest Orb merges with your armour and sword\n+4 Defence\n-1 Damage")
+                                Print("The Forest Orb merges with your armour and sword\n+4 Armour Defence\n-1 Sword Damage")
                                 player_data['gold'] += 100
                                 for armour in armour_data:
                                     if armour['name'] == player_data['armour_equipped']:
@@ -1274,26 +1586,26 @@ def explore_forest(player_data, weapons_data, game_stats):
                     
                     # Randomly select discovery dialogue
                     Print(random.choice(discovery_dialogues))
-                    time.sleep(3)
+                    time.sleep(2)
                     # Randomly select greeting
                     Print("\n" + random.choice(greetings))
-                    time.sleep(3)
+                    time.sleep(2)
                     # Randomly select knight's response
                     Print("\n" + random.choice(knight_responses))
-                    time.sleep(3)
+                    time.sleep(2)
                     # Randomly select second dialogue
                     Print("\n" + random.choice(second_dialogues))
-                    time.sleep(3)
+                    time.sleep(2)
                     Print("[Caterpillar Princess] I know of your journey to fight the dragon, I also know that you arent currently strong enough to beat him yet, so take this:")
                     reward = random.choice(rewards)
                     Print(f"\nThe Caterpillar Princess hands you a {reward['item']}.")
                     Print(f"Description: {reward['description']}")
-                    if reward['item'] == "Armour Plates":
-                        Print("You use the armour plates\n+5 Defence")
+                    if reward['item'] == "Armour Plate":
+                        Print("You use the armour plates\n+3 Armour Defence")
                         for armour in armour_data:
                                 if armour['name'] == player_data['armour_equipped']:
-                                    armour['defence'] += 5
-                                    player_data['defence'] += 5
+                                    armour['defence'] += 3
+                                    player_data['defence'] += 3
                         
                     elif reward['item'] == "Potion of Strength":
                         Print("\n--You drink the potion--\n\n+15 Max Health\n+20 Health\n+3 Strength")
@@ -1302,11 +1614,24 @@ def explore_forest(player_data, weapons_data, game_stats):
                         player_data['strength'] += 3
                     
                     elif reward['item'] == "Caterpillar Charm":
-                        Print("\n--You wear the charm around your wrist--\n\n+20% Critical Hit Chance")
-                        for weapon in weapons_data:
-                                if weapon['name'] == player_data['weapon_equipped']:
-                                    weapon['crit_chance'] += 20
-                                    player_data['crit_chance'] += 20
+                        Print("\n--You wear the charm around your wrist--\n\n+30% Critical Hit Chance")
+
+                        # Find equipped weapon
+                        equipped_weapon = None
+                        for w in weapons_data:
+                            if w["name"] == player_data["weapon_equipped"]:
+                                equipped_weapon = w
+                                break
+
+                        if equipped_weapon:
+                            # Apply crit buff to the weapon itself
+                            equipped_weapon["crit_chance"] += 30
+
+                            # Re-equip to recalc crit correctly via your existing function
+                            view_weapon_stats(player_data, equipped_weapon, weapons_data)
+
+                        break
+
                         
                     elif reward['item'] == "Forest Jewel":
                         Print("\n--You use the Jewel--\n\n+65 Max Health")
@@ -1322,7 +1647,8 @@ def explore_forest(player_data, weapons_data, game_stats):
 
                     if not seen_bob:  # First time meeting Bob
                         while True:
-                            action = input("[Bob] Hello stranger, I am heading to the castle to steal from their vault. If you tell me the way to the castle, I will give you a cut.\n\n[1] Tell Him\n[2] Start Capping\nEnter: ")
+                            Print("[Bob] Hello stranger, I am heading to the castle to steal from their vault. If you tell me the way to the castle, I will give you a cut.")
+                            action = input("\n[1] Tell Him\n[2] Start Capping\nEnter: ")
 
                             seen_bob = True  # Marks Bob as encountered
 
@@ -1330,6 +1656,7 @@ def explore_forest(player_data, weapons_data, game_stats):
                                 Print("\n[Knight] I don't exactly remember the way, but if you head to the clearing that way, you should be able to see the castle.")
                                 Print("\n[Bob] Thanks man, I shall give you the rewards if I am to see you again.")
                                 helped_bob = True
+                                seen_bounty_hunter = False
                                 break
 
                             elif action == '2':  # Rejecting Bob
@@ -1337,7 +1664,7 @@ def explore_forest(player_data, weapons_data, game_stats):
                                 Print("\n[Bob] Okay, well, I shall continue on my adventure then.")
                                 helped_bob = False
                                 break
-                            
+
                             else:
                                 Print("Please Enter a valid input")
 
@@ -1355,89 +1682,154 @@ def explore_forest(player_data, weapons_data, game_stats):
                                 Print("\n[Old Lady] Thank you, kind soul! Here, take this potion for your troubles.\n+1 Health Potion")
                                 player_data['max_health'] -= 10
                                 action = input("\nDo you want to use the potion now?\n\n[1] Yes\n[2] No\nEnter: ")
-                                if action == '1':  
-                                    use_health_potion(player_data)
-                                else:
+                                if action == '1':
+                                    use_health_potion(player_data, game_stats)
+                                elif action == '2':
                                     Print("\nYou decide to save it for later in case of an emergency")
                                     player_data['health_potions'] += 1
+                                else:
+                                    Print("Please Enter a valid input")
+                                    continue
                                 break
                             elif action == '2':
                                 Print("\n[Old Lady] May fortune still find you, even if kindness does not...")
                                 break
-                    
+                            else:
+                                Print("Please Enter a valid input")
+
                     # Increase stat of good events by 1
                     game_stats['good_events'] += 1
 
+
                 elif random_event <= 0.65:  # Bounty hunter event
-                    if seen_bounty_hunter == False:
-                        Print("[Bounty Hunters] Have you seen this little guy called Bob wandering around robbing places and 'giving you a cut' of what he steals?")
+                    while True:
+                        if not seen_bounty_hunter:
+                            Print("[Bounty Hunters] Have you seen this little guy called Bob wandering around robbing places and 'giving you a cut' of what he steals?")
+                            seen_bounty_hunter = True
+                            action = input("\n[1] Yes, I know where he is\n[2] I have never seen him before\nEnter: ")
 
-                        seen_bounty_hunter = True
+                            # Told the hunters yes
+                            if action == '1':
+                                if helped_bob:  # You helped Bob earlier
+                                    Print("\n[Knight] He is heading towards my castle to rob it!")
+                                    time.sleep(1.5)
+                                    Print("\n[Bounty Hunters] Well, I hate to tell you this, but he was asking where the castle was and it appears you have told him.")
+                                    time.sleep(3)
+                                    Print("-----Castle-----")
+                                    time.sleep(0.5)
+                                    Print("\n[Queen] Why, Knight, did you betray me like this?")
+                                    time.sleep(1)
+                                    Print("\n[Knight] I'm sorry, my queen.")
+                                    Print("\n[Queen] It's okay, Knight. I shall just require you to pay a small amount of the vault back...")
 
-                        action = input("\n[1] Yes, I know where he is\n[2] I have never seen him before\nEnter: ")
+                                    while True:
+                                        sub_action = input("\n[1] Pay\n[2] Refuse to pay\nEnter: ")
 
-                        if action == '1':  # Telling on Bob
-                            if helped_bob:
-                                Print("\n[Knight] He is heading towards my castle to rob it!")
-                                time.sleep(1.5)
-                                Print("\n[Bounty Hunters] Well, I hate to tell you this, but he was asking where the castle was and it appears you have told him.")
-                                time.sleep(3)
-                                Print("-----Castle-----")
-                                time.sleep(0.5)
-                                Print("\n[Queen] Why, Knight, did you betray me like this?")
-                                time.sleep(1)
-                                Print("\n[Knight] I'm sorry, my queen.")
-                                Print("\n[Queen] It's okay, Knight. I shall just require you to pay a small amount of the vault back...")
+                                        if sub_action == '1':
+                                            Print("\n[Queen] 2000 GOLD! Guards, empty his pockets.")
 
-                                while True:
-                                    action = input("\n[1] Pay\n[2] Go to the dungeons\nEnter: ")
-                                    if action == '1':
-                                        Print("\n[Queen] 2000 GOLD! Guards, empty his pockets.")
-                                        if player_data['gold'] >= 2000:
-                                            Print("\n-2000 Gold")
-                                            player_data['gold'] -= 2000
+                                            if player_data['gold'] >= 2000:
+                                                Print("\n-2000 Gold")
+                                                player_data['gold'] -= 2000
+                                                Print("\n[Queen] The debt is settled.")
+                                                break
+
+                                            else:
+                                                Print("\n[Knight] But my Queen, I do not have 2000 gold.")
+                                                Print("\n[Queen] Then you will wager your life instead.")
+
+                                                Print("\n[Queen] Face the elite gambler of Klare.")
+                                                Print("[Queen] Win, and you live. Lose... and you die.")
+
+                                                difficulty = "elite"
+                                                enemy_name = "Rich guy"
+                                                gold_bet = 2000
+
+                                                play_21(player_data, klare_data, difficulty, gold_bet, enemy_name, game_stats)
+
+                                                if enemy_name not in klare_data['elite_beaten']:
+                                                    Print("\n[Queen] You have failed.")
+                                                    Print("[Queen] You are no longer needed knight, goodbye")
+
+                                                    Print("\n[Knight] ...So this is how it ends.")
+
+                                                    player_data['health'] = 0
+                                                    Print("\nYou were executed for defying the queen.\n")
+                                                    check_death()
+
+                                                else:
+                                                    Print("\n[Queen] Hmph. Your skill has spared you this time.")
+                                                    Print("[Queen] The stolen gold is reclaimed.")
+
+                                                break
+
+                                        elif sub_action == '2':
+                                            Print("\n[Knight] I refuse to pay.")
+
+                                            Print("\n[Queen] Then you leave me no choice.")
+                                            Print("[Queen] You will face the elite gambler of Klare.")
+                                            Print("[Queen] Win, and you live. Lose... and you die.")
+
+                                            difficulty = "elite"
+                                            enemy_name = "Rich guy"
+                                            gold_bet = 2000
+
+                                            play_21(player_data, klare_data, difficulty, gold_bet, enemy_name, game_stats)
+
+                                            if enemy_name not in klare_data['elite_beaten']:
+                                                Print("\n[Queen] You have lost. Guards... end this.")
+
+                                                Print("\n[Knight] ...So this is how it ends.")
+
+                                                player_data['health'] = 0
+                                                Print("\nYou were executed for defying the Queen.")
+                                                return
+
+                                            else:
+                                                Print("\n[Queen] Very well. You have proven your worth.")
+                                                Print("[Queen] The stolen gold is reclaimed.")
+
                                             break
+
                                         else:
-                                            Print("\n[Knight] But my Queen, I do not have 2000 gold.")
-                                            Print("\n[Queen] Well then... it is... OFF TO THE DUNGEONS for you.")
-                                            dungeons_reason = "queen"
-                                            dungeons(player_data, dungeons_reason)
-                                            break
-                                    elif action == '2':
-                                        Print("\n[Knight] I would rather go to the dungeons than pay you!")
-                                        Print("\n[Queen] Then, your wish is granted")
-                                        dungeons_reason = "queen"
-                                        dungeons(player_data, dungeons_reason)
-                                        break
+                                            Print("Please Enter a valid input.")
 
-                                    # Increase stat of bad events by 1
-                                    game_stats['bad_events'] += 1 
+                                    game_stats['bad_events'] += 1
+                                    break
 
-                            elif seen_bob and not helped_bob:  # Told bounty hunters after rejecting Bob
-                                Print("\n[Knight] Well, when I said I know where he is... I mean I sent him off in that direction.")
-                                Print("\n[Bounty Hunters] Thanks! We will be on our way. Just so you know, he was never going to give back that gold. Here's a thanks :) \n+250 Gold")
-                                player_data['gold'] += 250
+                                elif seen_bob and not helped_bob:  # You rejected Bob before
+                                    Print("[Bounty Hunters] Ah, so you helped this little guy rob the castle did you?")
+                                    Print("\n[Knight] Well... when I said I know where he is... I mean I sent him off in that direction.")
+                                    Print("\n[Bounty Hunters] Thanks! We will be on our way. Just so you know, he was never going to give back that gold. Here's a thanks :) \n+250 Gold")
+                                    player_data['gold'] += 250
+                                    game_stats['good_events'] += 1
+                                    break
 
-                                # Increase stat of good events by 1
-                                game_stats['good_events'] += 1
+                                else:  # You never met Bob
+                                    Print("\n[Bounty Hunters] You do know that having helped him will result in the dungeon penalty?")
+                                    time.sleep(1)
+                                    Print("\n[Knight] Haha 🫥 just kidding. I have no idea who or where this guy is.")
+                                    break
 
-                            else:  # Lying about seeing Bob
-                                Print("\n[Knight] Haha, just kidding. I have no idea who or where this guy is.")
-
-                        elif action == '2':  # Lying to protect Bob
-                            if helped_bob:
-                                Print("\n[Bounty Hunters] Haha, well you see, Bob... is this the guy who gave you directions?")
-                                Print("\n[Bob] Never *winks*")
-                                Print("\nHe gestures you with his head over to the trees... once the bounty hunters leave with bob you scurry over to the trees and find a chest filled with gold\n+1000 Gold!!!")
-                                player_data['gold'] += 1000
-
-                                # Increase stat of good events by 1
-                                game_stats['good_events'] += 1
+                            elif action == '2':  # Lied to protect Bob or if you havent seen him
+                                if helped_bob:
+                                    Print("\n[Bounty Hunters] Haha, well you see, Bob... is this the guy who gave you directions?")
+                                    Print("\n[Bob] Never *winks*")
+                                    Print("\nHe gestures you with his head over to the trees... once the bounty hunters leave with bob you scurry over to the trees and find a chest filled with gold\n+1000 Gold!!!")
+                                    player_data['gold'] += 1000
+                                    game_stats['good_events'] += 1
+                                    break
+                                else:
+                                    Print("\n[Bounty Hunters] Well, if you ever see him, let us know, and we will pay you highly.")
+                                    break
 
                             else:
-                                Print("\n[Bounty Hunters] Well, if you ever see him, let us know, and we will pay you highly.")
-                    else:
-                        Print("[Bounty Hunters] I assume you still haven't seen him...\n\n[Knight] No I have not")
+                                Print("Please Enter a valid input")
+                                continue
+
+                        else:
+                            Print("[Bounty Hunters] I assume you still haven't seen him...\n\n[Knight] No I have not")
+                            break
                             
                 elif random_event <= 0.70: # witch that sets player stats to original but doubles a random stat
                     Print("You stumble into a mysterious forest")
@@ -1484,12 +1876,13 @@ def explore_forest(player_data, weapons_data, game_stats):
 
                             player_data['weapon_equipped'] = "Bronze Sword"
                             player_data['owned_weapons'] = ["Bronze Sword"]
+                            player_data['crit_chance'] = 9 # bronze sword crit chance
                             weapons()
 
                             Print(f"\n[Dark Witch] I have reset your Max Health, Health, Gold and taken all your Weapons but doubled your {changed_stat}.")
                             Print(f"[Dark Witch] Old: {changed_stat} {starting_stat}, New: {changed_stat} {new_stat}.")
                             
-                            if not player_data['companions']:
+                            if player_data['companions'] == 0:
                                 Print("[Dark Witch] I have also summoned a companion for your adventures.")
                                 player_data['companions'] += 1
                             break
@@ -1499,7 +1892,7 @@ def explore_forest(player_data, weapons_data, game_stats):
                             break
 
                         else:
-                            Print("\n[Unknown] Invalid choice. The voice fades away.")
+                            Print("\nPlease Enter a valid input")
                         
                 elif random_event <= 0.75: # Meet a friendly orc, rock or albert
                     friendly_enemy = [
@@ -1566,7 +1959,7 @@ def explore_forest(player_data, weapons_data, game_stats):
                         else:
                             Print("Please Enter a valid input")
               
-                elif random_event <= 0.85:
+                elif random_event <= 0.85: # berry event
 
                     Print("Since you are running low on food you decide to go and hunt for some berries")
                     
@@ -1589,26 +1982,25 @@ def explore_forest(player_data, weapons_data, game_stats):
                         # Randomly select a berry
                         berry = random.choice(berries)
                         
-                        # Ask for the player's action
                         action = input(f"\nDo you want to eat the {berry} berry?\n\n[1] Yes\n[2] No\nEnter: ")
                         
                         if action == '1':
-                            # Generate and apply a random effect
+                            # Apply a random effect
                             effect = random_berry_effect(player_data)
-                            Print(f"You eat the {berry} berry! It {effect}")
+                            Print(f"\nYou eat the {berry} berry! It {effect}")
                             berries_left -= 1
                             
                             action = input("\nDo you want to continue looking?\n\n[1] Yes\n[2] No\nEnter: ")
                             
                             if berries_left == 0:
-                                Print("You couldnt find anymore berries to eat")
+                                Print("\nYou couldnt find anymore berries to eat")
                                 break
                             
                             if action == '1':
-                                Print("You continue looking and find another berry!")
+                                Print("\nYou continue looking and find another berry!")
                                 
                             elif action == '2':
-                                Print("You decide you are full and stop looking")
+                                Print("\nYou decide you are full and stop looking")
                                 break
                             
                         elif action == '2':
@@ -1625,7 +2017,7 @@ def explore_forest(player_data, weapons_data, game_stats):
                         while True:
                             action = input("\n[1] Help (HARD)\n[2] Ignore\nEnter: ")
                             if action == '1':
-                                Print("You follow the slime soldier to the kingdom and see a massive slime king being attacked by a group of bandits")
+                                Print("\nYou follow the slime soldier to the kingdom and see a massive slime king being attacked by a group of bandits")
                                 fight_campfire_bandit = True
                                 battle(player_data, game_stats)
                                 battle(player_data, game_stats)
@@ -1657,7 +2049,54 @@ def explore_forest(player_data, weapons_data, game_stats):
                     forest_blacksmith(player_data, weapons_data, armour_data, game_stats)
 
                 else:
-                    print("You found nothing")
+                    if "Shiny Sword" not in player_data['owned_weapons']:
+                        Print("You walk up to a sword stuck in some stone, how will you try to get it out?")
+
+                        game_stats['good_events'] += 1
+                        while True:
+                            action = input("\n[1] Use Max Health\n[2] Use Strength\n[3] Use your sword\n[4] Ask your companions to help\nEnter: ")
+
+                            if action == '1':
+                                if player_data['max_health'] >= 200:
+                                    Print("\nUsing your massive body, you force the sword out of the stone")
+                                    Print("---You found a Shiny Sword!!---")
+                                    player_data['owned_weapons'].append("Shiny Sword")
+                                else:
+                                    Print("You try to lift it out of the stone but aren't strong enough yet")
+                                break
+
+                            elif action == '2':
+                                if player_data['strength'] >= 5:
+                                    Print("\nUsing pure strenth, you smash the stone to pieces and grab the sword")
+                                    Print("---You found a Shiny Sword!!---")
+                                    player_data['owned_weapons'].append("Shiny Sword")
+                                else:
+                                    Print("You punch the rocks as hard as you can but nothing happens")
+                                break
+
+                            elif action == '3':
+                                Print("\nYou swing your sword into the stone, blunting it in the proccess. What did you think would happen? 💀\n-1 Damage")
+                                for weapon in weapons_data:
+                                    if weapon['name'] == player_data['weapon_equipped']:
+                                        weapon['damage'] -= 1
+                                break
+
+                            elif action == '4':
+                                if player_data['companions'] >= 2:
+                                    Print("\nYou and your companions gather around and all lift at once. The sword comes loose!!")
+                                    Print("---You found a Shiny Sword!!---")
+                                    player_data['owned_weapons'].append("Shiny Sword")
+                                else:
+                                    Print("[Companion] I am nawt even gonna try.")
+
+                                break
+
+                            else:
+                                print("\nPlease enter a valid input")
+                    else:
+                        Print("You found nothing")
+
+
                             
             # Player finds a shrine
             elif exploration <= 0.60:
@@ -1707,6 +2146,7 @@ def explore_forest(player_data, weapons_data, game_stats):
                             else:
                                 Print("\nYou slip and fall!\n-20 Health")
                                 player_data['health'] -= 20
+                                check_death(player_data, game_stats)
 
                                 # Increase stat of bad events by 1
                                 game_stats['bad_events'] += 1 
@@ -1730,10 +2170,10 @@ def explore_forest(player_data, weapons_data, game_stats):
                                     fight_merchant = False
                                     break
                                 elif action == '3':
-                                    Print("[Knight] I don't feel like dealing with that right now")
+                                    Print("\n[Knight] I don't feel like dealing with that right now")
                                     break
                                 else:
-                                    Print("Please Enter a valid input")
+                                    Print("\nPlease Enter a valid input")
                         
 
                         elif shrine_luck <= 0.90:  # Sleeping Bear 15%
@@ -1755,11 +2195,11 @@ def explore_forest(player_data, weapons_data, game_stats):
                                     else:
                                         Print("\nThe bear wakes up and swipes at you! -25 Health")
                                         player_data['health'] -= 25
+                                        check_death(player_data, game_stats)
 
                                         # Increase stat of bad events by 1
                                         game_stats['bad_events'] += 1 
-
-                                    break
+                                        break
 
                                 elif action == '2':
                                     Print("\nYou battle the bear fiercely, and as you slash through it's bones it somehow sharpens your sword\n+1 Damage\n-30 Health")
@@ -1797,10 +2237,10 @@ def explore_forest(player_data, weapons_data, game_stats):
                         break
                     
                     elif action == '2':
-                        Print("You leave the shrine alone")
+                        Print("\nYou leave the shrine alone")
                         break
                     else:
-                        Print("Please Enter a valid input")
+                        Print("\nPlease Enter a valid input")
                         
             # Player walks into a trap
             elif exploration <= 0.70:
@@ -1841,9 +2281,12 @@ def explore_forest(player_data, weapons_data, game_stats):
                 # Increase stat of good events by 1
                 game_stats['good_events'] += 1 
 
-                forest_merchant(player_data, game_stats)
+                forest_merchant(player_data, game_stats, weapons_data, armour_data)
 
             exploration_time -= 1
+
+            # Adds earned gold to stat
+            track_gold_earned(player_data, before_gold, game_stats)
             
             if settings['enter_to_continue']:
                 if exploration_time == 0:
@@ -1854,7 +2297,7 @@ def explore_forest(player_data, weapons_data, game_stats):
             player_data['day'] += 1
             if player_data['day'] == 15:
                 Print("\n[Knight] There is nothing left here... I think it's time I continue onto the Frozen Peaks, MIGHTY DRAGON HERE I COME")
-                Print("\nYou hike through the rest of the forest and just before you exit you are stopped by the HOWLER")
+                Print("\nYou hike through most of the forest and before you exit you are stopped by the HOWLER")
                 fight_boss = True
                 battle(player_data, game_stats)
                 fight_boss = False
@@ -1869,393 +2312,295 @@ def explore_forest(player_data, weapons_data, game_stats):
             break
 
 # Forest Merchant Encounter
-def forest_merchant(player_data, game_stats):
-    print("\n-------------------------------------------------------------------------")
+def forest_merchant(player_data, game_stats, weapons_data, armour_data):
     Print(f"\n-----Merchant-----")
-    Print("[Merchant] Hello I am a merchant what would you like to buy?")
+    Print("[Merchant] Hello I am a merchant! What would you like to buy?")
+
     while True:
-        
         if player_data['weapon_equipped'] not in player_data['owned_weapons']:
             player_data['owned_weapons'].append(player_data['weapon_equipped'])
         if player_data['armour_equipped'] not in player_data['owned_armour']:
             player_data['owned_armour'].append(player_data['armour_equipped'])
-                
+
         Print(f"\nYou have {player_data['gold']} Gold")
-        print("\n-----Swords-----\n\n[1] Iron Sword --100 Gold--\n[2] Steel Sword --300 Gold--\n\n-----Bows-----\n\n[3] Hunting bow --225 Gold--\n\n-----Spears-----\n\n[4] Wooden Spear --250 Gold--\n\n-----Armour-----\n\n[5] Cloth Armour --225 Gold--\n[6] Iron Armour --550 Gold--")
-        print("\n-----Potions/Crystals-----\n\n[7] Health Potion --100 Gold--\n[8] Health Crystal --350 Gold--\n\n-----Items-----\n\n[9] Enchant Book --750 Gold--")
-        action = input("\n[r] Exit\nEnter: ").lower()
-        if action == '1':
-            if player_data['gold'] >= 100:
-                confirmation = input("Press Enter to confirm or ' r ' to Return ")
-                if confirmation == '':
-                    if "Iron Sword" in player_data['owned_weapons']:
-                        Print("\n[Merchant] You don't need another Iron Sword I see one on your back")
-                    else:
-                        Print("\n[Knight] I would like an ☆ Iron Sword ☆ Please")
-                        time.sleep(1)
-                        Print("\n-100 Gold")
-                        player_data['gold'] -= 100
-                        player_data['weapon_equipped'] = "Iron Sword"
-                        time.sleep(1)
-                        Print("\n[Merchant] Here you go young one")
 
-                        # Increase stat of items bought by 1
-                        game_stats['items_bought'] += 1
-            else:           
-                Print("[Merchant] Sorry but you can't afford this item")
+        print("\n-----Swords-----\n\n[1] Iron Sword --200 Gold--\n[2] Steel Sword --450 Gold--")
+        print("\n-----Bows-----\n\n[3] Hunting Bow --180 Gold--")
+        print("\n-----Spears-----\n\n[4] Wooden Spear --220 Gold--")
+        print("\n-----Armour-----\n\n[5] Cloth Armour --225 Gold--\n[6] Iron Armour --500 Gold--")
+        print("\n-----Potions/Crystals-----\n\n[7] Health Potion --100 Gold--\n[8] Health Crystal --350 Gold--")
+        print("\n-----Items-----\n\n[9] Enchant Book --750 Gold--")
+        print("\n-----Other-----\n\n[i] View Inventory\n[r] Exit")
+
+        action = input("\nEnter: ").lower()
+
+
+        # ----------------- Inventory -----------------
+        if action == 'i':
+            inventory_display(player_data, weapons_data, armour_data)
+            continue
+
+
+        # ----------------- Weapons -----------------
+        if action in ['1','2','3','4']:
+
+            weapon_map = {
+                '1': ('Iron Sword', 200),
+                '2': ('Steel Sword', 450),
+                '3': ('Hunting Bow', 180),
+                '4': ('Wooden Spear', 220)
+            }
+
+            weapon_name, cost = weapon_map[action]
+            new_weapon = get_weapon_by_name(weapon_name)
+
+            if player_data['gold'] < cost:
+                Print("\n[Merchant] Sorry but you can't afford this item.")
+                continue
+
+            if weapon_name in player_data['owned_weapons']:
+                Print(f"\n[Merchant] You already have the {weapon_name}.")
+                continue
+
+            stat_comparison(get_weapon_by_name(player_data['weapon_equipped']), new_weapon, "weapon")
             
-        elif action == '2':
-            if player_data['gold'] >= 300:
-                confirmation = input("Press Enter to confirm or ' r ' to Return ")
-                if confirmation == '':
-                    if "Steel Sword" in player_data['owned_weapons']:
-                        Print("\n[Merchant] You don't need another Steel Sword I see one on your back")
-                    else:
-                        Print("\n[Knight] Can I have a ☆ Steel Sword ☆ Please")
-                        Print("\n-300 Gold")
-                        player_data['gold'] -= 300
-                        player_data['weapon_equipped'] = "Steel Sword"
-                        time.sleep(0.5)
-                        Print("\n[Merchant] I believe you can kill anything with this!")
+            if input("\nPress Enter to confirm or 'r' to cancel: ") == "":
+                Print(f"\n-{cost} Gold")
+                player_data['gold'] -= cost
+                player_data['owned_weapons'].append(weapon_name)
 
-                        # Increase stat of items bought by 1
-                        game_stats['items_bought'] += 1
-            else:
-                Print("[Merchant] Sorry but you can't afford this item")
+                Print("\n[Merchant] Excellent choice, knight.")
+                game_stats['items_bought'] += 1
 
-        elif action == '3':
-            if player_data['gold'] >= 225:
-                confirmation = input("Press Enter to confirm or ' r ' to Return ")
-                if confirmation == '':
-                    if "Hunting Bow" in player_data['owned_weapons']:
-                        Print("You already own this")
-                    else:
-                        Print("\n[Knight] Can I have a ☆ Hunting Bow ☆ Please")
-                        Print("\n-225 Gold")
-                        time.sleep(0.5)
-                        Print("\n[Merchant] Thats a good choice! Hope it does you well")
-                        player_data['gold'] -= 225
-                        player_data['weapon_equipped'] = "Hunting Bow"
-                        time.sleep(0.5)
-                        Print("[Merchant] Good luck")
+        # ----------------- Armour -----------------
+        elif action in ['5','6']:
 
-                        # Increase stat of items bought by 1
-                        game_stats['items_bought'] += 1
-            else:
-                Print("[Merchant] Sorry but you can't afford this item")
+            armour_map = {
+                '5': ('Cloth Armour', 225),
+                '6': ('Iron Armour', 500)
+            }
 
-        elif action == '4':
-            if player_data['gold'] >= 250:
-                confirmation = input("Press Enter to confirm or ' r ' to Return")
-                if confirmation == '':
-                    if "Wooden Spear" in player_data['owned_weapons']:
-                        Print("You already own this")
-                    else:
-                        Print("\n[Knight] Can I have a ☆ Wooden Spear ☆ Please")
-                        Print("\n-250 Gold")
-                        time.sleep(0.5)
-                        Print("\n[Merchant] Not my first pick but, I hope it serves you well")
-                        player_data['gold'] -= 250
-                        player_data['weapon_equipped'] = "Wooden Spear"
-                        time.sleep(0.5)
-                        Print("[Merchant] Go get them knight!")
+            armour_name, cost = armour_map[action]
+            selected_armour = get_armour_by_name(armour_name)
 
-                        # Increase stat of items bought by 1
-                        game_stats['items_bought'] += 1
+            if player_data['gold'] < cost:
+                Print("\n[Merchant] Sorry but you can't afford this item.")
+                continue
 
-        elif action == '5':
-            if player_data['gold'] >= 225:
-                confirmation = input("Press Enter to confirm or ' r ' to Return ")
-                if confirmation == '':
-                    if "Cloth Armour" in player_data['owned_armour']:
-                        Print("You already own this")
-                    else:
-                        for armour in armour_data:
-                            if armour['name'] == player_data['armour_equipped']:
-                                player_data['defence'] -= armour['defence']
-                                Print("\n[Knight] Can I have some ☆ Cloth Armour ☆ ?")
-                                Print("\n-225 Gold")
-                                time.sleep(0.5)
-                                Print("\n[Merchant] Thats not a bad idea, hope to see you back here soon for Iron Armour!")
-                                player_data['defence'] += 4
-                                player_data['gold'] -= 225
-                                player_data['armour_equipped'] = "Cloth Armour"
-                                time.sleep(0.5)
-                                Print("[Merchant] Good luck. Knight. I wish you the best")
+            if armour_name in player_data['owned_armour']:
+                Print(f"\n[Merchant] You already own {armour_name}.")
+                continue
 
-                                # Increase stat of items bought by 1
-                                game_stats['items_bought'] += 1
+            stat_comparison(get_armour_by_name(player_data['armour_equipped']), selected_armour, "armour")
 
-                                break
-            else:            
-                Print("[Merchant] Sorry but you can't afford this item")
-            
-        elif action == '6':
-            if player_data['gold'] >= 550:
-                confirmation = input("Press Enter to confirm or ' r ' to Return ")
-                if confirmation == '':
-                    if "Iron Armour" in player_data['owned_armour']:
-                        Print("You already own this")
-                    else:
-                        for armour in armour_data:
-                            if armour['name'] == player_data['armour_equipped']:
-                                player_data['defence'] -= armour['defence']
-                                Print("\n[Knight] Can I have some ☆ Iron Armour ☆ ?")
-                                time.sleep(0.5)
-                                Print("\nThe merchant gives a slow and approving nod")
-                                time.sleep(1)
-                                Print("\n-550 Gold")
-                                player_data['defence'] += 10
-                                player_data['gold'] -= 550
-                                player_data['armour_equipped'] = "Iron Armour"
-                                time.sleep(0.5)
-                                Print("\n[Merchant] Good luck in the Frozen Peaks knight 😉")
+            if input("\nPress Enter to confirm or 'r' to cancel: ") == "":
+                Print(f"\n-{cost} Gold")
+                player_data['gold'] -= cost
+                player_data['owned_armour'].append(armour_name)
 
-                                # Increase stat of items bought by 1
-                                game_stats['items_bought'] += 1
-                                break
-                        
-            else:            
-                Print("[Merchant] Sorry but you can't afford this item")
-            
+                # add new armour defence
+                old_def = get_equipped_armour_defence(player_data, armour_data)
+                player_data['defence'] -= old_def
+
+                player_data['armour_equipped'] = armour_name
+
+                player_data['defence'] += selected_armour['defence']
+
+                Print("\n[Merchant] May it protect you in every battle ahead.")
+                game_stats['items_bought'] += 1
+
+
+        # ----------------- Items -----------------
         elif action == '7':
-            if player_data['gold'] >= 100:
-                confirmation = input("Press Enter to confirm or ' r ' to Return ")
-                if confirmation == '':
-                    Print("\n[Knight] One health potion Merchant!")
-                    Print("\n-100 Gold")
-                    Print("\n[Merchant] Here you go! Did you know that if you die but have a health potion in your inventory it will use the potion and keep you alive instead? All for 100 gold")
-                    Print("\n[Merchant] Is there anything else I can get for you?")
-                    player_data['gold'] -= 100
-                    action = input("\nDo you want to use the potion now?\n\n[1] Yes\n[2] No\nEnter: ")
-                    if action == '1':  
-                        use_health_potion(player_data)
-                    else:
-                        Print("You decide to save it for later in case of an emergency")
-                        player_data['health_potions'] += 1
-                    
-                    # Increase stat of items bought by 1
-                    game_stats['items_bought'] += 1
-            else:            
-                Print("[Merchant] Sorry but you can't afford this item")  
-                     
+            if player_data['gold'] < 100:
+                Print("\n[Merchant] Sorry but you can't afford this item.")
+                continue
+
+            Print("\n-----Health Potion-----")
+            if input("\nPress Enter to confirm or 'r' to cancel: ") == "":
+                player_data['gold'] -= 100
+                player_data['health_potions'] += 1
+                Print("\n[Merchant] Stay alive out there.")
+                game_stats['items_bought'] += 1
+
+
         elif action == '8':
-            if player_data['gold'] >= 350:
-                confirmation = input("Press Enter to confirm or ' r ' to Return ")
-                if confirmation == '':
-                    Print("\n[Knight] Can I have the Health Crystal Please?")
-                    Print("\n-350 Gold")
-                    Print("\n[Merchant] Sure thing, now you should be ready for anything!")
-                    Print("\nYou stare into the crystal.\n+20 Max Health\n+30 Health")
-                    player_data['gold'] -= 350
-                    player_data['max_health'] += 20
-                    player_data['health'] += 20   
+            if player_data['gold'] < 250:
+                Print("\n[Merchant] Sorry but you can't afford this item.")
+                continue
 
-                    # Increase stat of items bought by 1
-                    game_stats['items_bought'] += 1
+            Print("\n-----Health Crystal-----")
+            if input("\nPress Enter to confirm or 'r' to cancel: ") == "":
+                player_data['gold'] -= 250
+                player_data['max_health'] += 35
+                player_data['health'] += 50
+                Print("\n[Merchant] A strong choice.")
+                game_stats['items_bought'] += 1
 
-            else:        
-                Print("[Merchant] Sorry but you can't afford this item")
-                
+
         elif action == '9':
-            if player_data['gold'] >= 750:
-                confirmation = input("Press Enter to confirm or ' r ' to Return ")
-                if confirmation == '':
-                    Print("\n[Knight] Can I an enchant book please?")
-                    Print("\n[Merchant] Sure thing")
-                    Print("\n-750 Gold")
-                    random_enchant(player_data, weapons_data) 
-                    player_data['gold'] -= 750
-                    Print("\n[Merchant] I hope you enjoy your new enchantment")
+            if player_data['gold'] < 750:
+                Print("\n[Merchant] Sorry but you can't afford this.")
+                continue
 
-                    # Increase stat of items bought by 1
-                    game_stats['items_bought'] += 1
-            else:        
-                Print("[Merchant] Sorry but you can't afford this item")
+            if input("\nPress Enter to confirm or 'r' to cancel: ") == "":
+                player_data['gold'] -= 750
+                random_enchant(player_data, weapons_data)
+                Print("\n[Merchant] Your weapon glows with power.")
+                game_stats['items_bought'] += 1
+
 
         elif action == 'r':
-            Print("\n[Merchant] I shall see you soon")
-            print("\n-------------------------------------------------------------------------")
-            if player_data['weapon_equipped'] not in player_data['owned_weapons']:
-                player_data['owned_weapons'].append(player_data['weapon_equipped'])
-            if player_data['armour_equipped'] not in player_data['owned_armour']:
-                player_data['owned_armour'].append(player_data['armour_equipped'])
+            Print("\n[Merchant] Farewell, knight.")
             break
 
-        elif action == 'rps':
-            start_rps()
-
         else:
-            Print("Please Enter a valid input") 
+            Print("Please enter a valid input.")
 
 # Blacksmith Shop
 def forest_blacksmith(player_data, weapons_data, armour_data, game_stats):
-    
     global upgraded_armour
 
     Print(f"\n{BLACK}-----Blacksmith-----{RESET}")
     Print("[Blacksmith] Hello Knight, what would ya like?")
+
     while True:
         Print(f"\nGold: {player_data['gold']}")
-        action = input("\n[1] Shop\n[2] Sharpen Sword --250 Gold--\n[3] Upgrade Armour (free)\n[r] Leave\nEnter: ").lower()
+        action = input(
+            "\n[1] Shop\n[2] Sharpen Sword --250 Gold--\n[3] Upgrade Armour (free)"
+            "\n\n[i] Inventory\n[r] Leave\nEnter: "
+        ).lower()
+
+
+        if action == 'i':
+            inventory_display(player_data, weapons_data, armour_data)
+            continue
+
+
         if action == '1':
-            Print("\n[Knight] I would like to look at your shop please!")
-            time.sleep(2)
+            Print("\n[Knight] What have you got blacksmith?")
+            time.sleep(1)
             os.system('cls')
-            Print(f"{BLACK}-----Blacksmith Shop-----{RESET}")
-            Print("\n[Blacksmith] Welcome to me shop")
+
+            weapon_map = {
+                '1': ('Iron Sword', 75),
+                '2': ('Steel Sword', 200)
+            }
+
+            armour_map = {
+                '3': ('Iron Armour', 425)
+            }
+
             while True:
-                
-                if player_data['weapon_equipped'] not in player_data['owned_weapons']:
-                    player_data['owned_weapons'].append(player_data['weapon_equipped'])
-                if player_data['armour_equipped'] not in player_data['owned_armour']:
-                    player_data['owned_armour'].append(player_data['armour_equipped'])
-                
-                Print("\n[Blacksmith] What can I get ya?")
-                Print(f"\nYou have {player_data['gold']} Gold")
-                action = input("\n-----Swords-----\n\n[1] Iron Sword --75 Gold--\n[2] Steel Sword --200 Gold--\n\n-----Armour-----\n\n[3] Iron Armour --475 Gold--\n[r] Leave\nEnter: ").lower()
-                if action == '1':
-                    if player_data['gold'] >= 75:
-                        confirmation = input("Press Enter to confirm or ' r ' to Return: ")
-                        if confirmation == '':
-                            if "Iron Sword" in player_data['owned_weapons']:
-                                Print("\n[Blacksmith] You don't need another Iron Sword I see one on your back")
-                            else:
-                                Print("\n[Knight] I would like an ☆ Iron Sword ☆ Please")
-                                time.sleep(1)
-                                Print("\n-75 Gold")
-                                player_data['gold'] -= 75
-                                player_data['weapon_equipped'] = "Iron Sword"
-                                time.sleep(1)
-                                Print("\n[Blacksmith] I always got the best deals just for you")
+                Print(f"\nGold: {player_data['gold']}")
+                action = input(
+                    "\n-----Swords-----"
+                    "\n[1] Iron Sword --75 Gold--"
+                    "\n[2] Steel Sword --200 Gold--"
+                    "\n\n-----Armour-----"
+                    "\n[3] Iron Armour --425 Gold--"
+                    "\n\n[r] Leave\nEnter: "
+                ).lower()
 
-                                # Increase stat of items bought by 1
-                                game_stats['items_bought'] += 1
-                                    
-                    else:
-                        Print("[Blacksmith] Sorry man you can't afford this") 
-                        
-                elif action == '2':
-                    if player_data['gold'] >= 200:
-                        confirmation = input("Press Enter to confirm or ' r ' to Return: ")
-                        if confirmation == '':
-                            if "Steel Sword" in player_data['owned_weapons']:
-                                Print("\n[Blacksmith] You don't need another Steel Sword I see one on your back")
-                            else:
-                                Print("\n[Knight] Can I have a ☆ Steel Sword ☆ Please")
-                                Print("\n-200 Gold")
-                                player_data['gold'] -= 200
-                                player_data['weapon_equipped'] = "Steel Sword"
-                                time.sleep(0.5)
-                                Print("\n[Blacksmith] I believe you can kill anything with this!")
 
-                                # Increase stat of items bought by 1
-                                game_stats['items_bought'] += 1
-                    else:
-                        Print("[Blacksmith] Sorry man you can't afford this") 
+                if action in weapon_map:
 
-                elif action == '3':
-                    if player_data['gold'] >= 475:
-                        confirmation = input("Press Enter to confirm or ' r ' to Return: ")
-                        if confirmation == '':
-                            if "Iron Armour" in player_data['owned_armour']:
-                                Print("You already own this")
-                            else:
-                                for armour in armour_data:
-                                    if armour['name'] == player_data['armour_equipped']:
-                                        player_data['defence'] -= armour['defence']
-                                        Print("\n[Knight] Can I have some ☆ Iron Armour ☆ ?")
-                                        time.sleep(0.5)
-                                        Print("\nHe heads to the back of the shop and grabs out the Iron armour")
-                                        time.sleep(1)
-                                        Print("\n-475 Gold")
-                                        player_data['defence'] += 10
-                                        player_data['gold'] -= 475
-                                        player_data['armour_equipped'] = "Iron Armour"
-                                        time.sleep(0.5)
-                                        Print("\n[Blacksmith] Here you go knight! Come back soon")
+                    name, cost = weapon_map[action]
+                    new_weapon = get_weapon_by_name(name)
 
-                                        # Increase stat of items bought by 1
-                                        game_stats['items_bought'] += 1
+                    if player_data['gold'] < cost:
+                        Print("[Blacksmith] You don't have the gold")
+                        continue
 
-                                        break
-                    else:
-                        Print("[Blacksmith] I'm truly sorry but you can't afford this")
+                    stat_comparison(
+                        get_weapon_by_name(player_data['weapon_equipped']),
+                        new_weapon,
+                        "weapon"
+                    )
+
+                    if input("\nPress Enter to confirm or 'r' to cancel: ") == "":
+                        Print(f"\n- {cost} Gold")
+                        player_data['gold'] -= cost
+                        player_data['owned_weapons'].append(name)
+
+                        Print("\n[Blacksmith] Solid choice")
+                        game_stats['items_bought'] += 1
+
+
+                elif action in armour_map:
+
+                    name, cost = armour_map[action]
+                    new_armour = get_armour_by_name(name)
+
+                    if player_data['gold'] < cost:
+                        Print("[Blacksmith] Not enough gold")
+                        continue
+
+                    stat_comparison(
+                        get_armour_by_name(player_data['armour_equipped']),
+                        new_armour,
+                        "armour"
+                    )
+
+                    if input("\nPress Enter to confirm or 'r' to cancel: ") == "":
+
+                        Print(f"\n- {cost} Gold")
+                        player_data['gold'] -= cost
+                        player_data['owned_armour'].append(name)
+
+                        Print("\n[Blacksmith] You're welcome knight, this is the best armour in the forest")
+                        game_stats['items_bought'] += 1
 
                 elif action == 'r':
-                    Print("\n[Blacksmith] Come back soon for another armour upgrade!")
-                    print("\n-------------------------------------------------------------------------")
-                    if (player_data['weapon_equipped']) not in player_data['owned_weapons']:
-                        player_data['owned_weapons'].append(player_data['weapon_equipped'])
-                    if player_data['armour_equipped'] not in player_data['owned_armour']:
-                        player_data['owned_armour'].append(player_data['armour_equipped'])
+                    Print("\n[Blacksmith] Come back soon knight!")
                     break
+
                 else:
-                    Print("Please Enter a valid input")
-            
+                    Print("Please Enter a input")
+
         elif action == '2':
-            if player_data['weapon_equipped'] == "Bronze Sword" or "Iron Sword":
-                action = input("\n250 Gold for 3 Extra Damage\nPress Enter to confirm or 'r' to cancel: ")
-                if action == 'r':
-                    pass
-                else:
-                    if player_data['gold'] >= 250:
-                        Print("\n-250 Gold\n+3 Damage")
-                        player_data['gold'] -= 250
-                        for weapon in weapons_data:
-                            if weapon['name'] == player_data['weapon_equipped']:
-                                weapon['damage'] += 3
-                    else:
-                        Print("\n[Blacksmith] That is unfortunately not enough to upgrade your sword")
-                    
-            elif player_data['weapon_equipped'] == "Flame Sword":
-                input("\n400 Gold for 3 Extra Damage\nPress Enter to confirm or 'r' tp cancel: ")
-                if action == 'r':
-                    pass
-                else:
-                    if player_data['gold'] >= 425:
-                        Print("\n-425 Gold\n+3 Damage")
-                        player_data['gold'] -= 425
-                        for weapon in weapons_data:
-                            if weapon['name'] == player_data['weapon_equipped']:
-                                weapon['damage'] += 1
-                    else:
-                        Print("\n[Blacksmith] That is unfortunately not enough to upgrade your sword")         
-            else:
-                Print("\n[Blacksmith] Sorry, I don't know how to upgrade that sword")
-                
+
+            if player_data['gold'] < 250:
+                Print("\n[Blacksmith] Not enough gold")
+                continue
+
+            if input("\n250 Gold for +3 Damage\nPress Enter to confirm or 'r' to cancel: ") == "":
+                player_data['gold'] -= 250
+                Print("\n+3 Weapon Damage")
+
+                for weapon in weapons_data:
+                    if weapon['name'] == player_data['weapon_equipped']:
+                        weapon['damage'] += 3
+                        break
+
         elif action == '3':
-            if upgraded_armour == False:
-                if player_data['armour_equipped'] == "No Armour" or player_data["armour_equipped"] == "Cloth Armour":
-                    Print("\n[Blacksmith] How am I meant to upgrade your armour if you don't have any?")
+
+            if upgraded_armour:
+                Print("\n[Blacksmith] Can't upgrade further.")
+                continue
+
+            if player_data['armour_equipped'] in ["No Armour", "Cloth Armour"]:
+                Print("\n[Blacksmith] You've got no armour to upgrade")
+                continue
                 
-                else:
-                    Print("\n[Knight] Can you upgrade my armour?")
-                    time.sleep(1)
-                    Print("\n[Blacksmith] Hand it over and I'll be back to you in a minute")
-                    time.sleep(2)
-                    Print("\n[Knight] Sure")
-                    time.sleep(2)
-                    Print("\n*tink *tink")
-                    time.sleep(0.6)
-                    Print("*bink *bam")
-                    Print("\n[Blacksmith] Here ya go\n+2 Armour Defence\n")
-                    upgraded_armour = True
-                    for armour in armour_data:
-                        if armour['name'] == player_data['armour_equipped']:
-                            armour['defence'] += 2
-                            player_data['defence'] += 2    
-            else:
-                Print("\n[Blacksmith] Sorry, I cant upgrade it any further")
-                
+            upgraded_armour = True
+
+            for armour in armour_data:
+                if armour['name'] == player_data['armour_equipped']:
+                    armour['defence'] += 2
+                    player_data['defence'] += 2
+                    print("\n+2 Armour Defence")
+                    break
+
+
+
         elif action == 'r':
             Print("\n[Blacksmith] See you next time!")
-            if player_data['weapon_equipped'] not in player_data['owned_weapons']:
-                player_data['owned_weapons'].append(player_data['weapon_equipped'])
-            if player_data['armour_equipped'] not in player_data['owned_armour']:
-                player_data['owned_armour'].append(player_data['armour_equipped'])
             break
-             
+
+        else:
+            Print("Please enter a valid input.")
+
 # -- Frozen Peaks -- #
 
 # Frozen Peaks Enemies list
@@ -2358,30 +2703,33 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
 
     while True:
         if exploration_time > 0:
-            if settings['debugging'] == False:
-                exploration = random.random()
             
-            elif picked_events_left > 0:
-                try:
-                    action = input("\n---Encounter Menu---\n[1] Exploration\n[2] Memory Game\n[3] Enemy Encounter\n[4] Merchant\nEnter: ")
-                    if action == '1':
-                        exploration = 0.45
-                    elif action == '2':
-                        exploration = 0.60
-                    elif action == '3':
-                        exploration = 0.93
-                    elif action == '4':
-                        exploration = 1
+            before_gold = player_data['gold']
 
-                except ValueError:
-                    exploration = random.random()
+            if picked_events_left > 0:
+                action = input("\n---Encounter Menu---\n[1] Exploration\n[2] Memory Game\n[3] Enemy Encounter\n[4] Merchant\nEnter: ")
+                if action == '1':
+                    exploration = 0.45
+                elif action == '2':
+                    exploration = 0.60
+                elif action == '3':
+                    exploration = 0.93
+                elif action == '4':
+                    exploration = 1
 
-            elif player_data['day'] == 13 and exploration_time == 4:
+            else:   
+                exploration = random.random()
+
+            if player_data['day'] == 13 and exploration_time == 4:
                 exploration = 1
             elif player_data['day'] == 19 and exploration_time == 1:
                 exploration = 1
+            elif player_data['day'] == 25 and exploration_time == 3:
+                exploration = 1
+            elif player_data['day'] == 29 and exploration_time == 1:
+                exploration = 1
 
-            else: # if player enables debug they can change the event
+            if player_data['debugging']: # if player enables debug they can change the event
                 try:
                     exploration = float(input("0 Exploration, 0.60 Memory, 0.70 Trap, 0.93 Enemy, 1 Merchant\nExploration value: "))
                 except ValueError:
@@ -2390,54 +2738,57 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
             # Main Exploration
             if exploration <= 0.45:
                 Print(f"\n{BLUE}-----Snow Exploration-----{RESET}")
-                
-                if settings['debugging'] == False:
-                    random_event = random.random()
-                
-                elif picked_events_left > 0:
+
+                # Wizard chooses first
+                if picked_events_left > 0:
                     picked_events_left -= 1
                     try:
-                        print("\n---Exploration Menu---\n[1] Find Elder Yeti\n[2] Caveman 21 Game\n[3] Tombstone Dungeon\n[4] Storm Power Increase\n[5] Abandoned Wooden Shack\n[6] Snow Safe Circle\n[7] Caravan Escort\n[8] Defence and Strength Swap")
-                        print("[9] Aurora In The Sky\n[10] Find a Companion\n[11] Endless Storm\n[12] Ice Cave\n[13] Blacksmith\n[14] Merchant")
+                        print("\n---Exploration Menu---\n[1] Find Elder Yeti\n[2] Tombstone Dungeon\n[3] Storm Power Increase\n[4] Abandoned Wooden Shack\n[5] Snow Safe Circle\n[6] Caravan Escort\n[7] Defence and Strength Swap")
+                        print("[8] Aurora In The Sky\n[9] Find a Companion\n[10] Endless Storm\n[11] Ice Cave\n[12] Blacksmith\n[13] Merchant")
                         action = input("Enter: ")
+
                         if action == '1':
                             random_event = 0.05
                         elif action == '2':
-                            random_event = 0.10
-                        elif action == '3':
                             random_event = 0.15
-                        elif action == '4':
+                        elif action == '3':
                             random_event = 0.30
-                        elif action == '5':
+                        elif action == '4':
                             random_event = 0.40
-                        elif action == '6':
+                        elif action == '5':
                             random_event = 0.45
-                        elif action == '7':
+                        elif action == '6':
                             random_event = 0.50
-                        elif action == '8':
+                        elif action == '7':
                             random_event = 0.55
-                        elif action == '9':
+                        elif action == '8':
                             random_event = 0.60
-                        elif action == '10':
+                        elif action == '9':
                             random_event = 0.65
-                        elif action == '11':
+                        elif action == '10':
                             random_event = 0.75
-                        elif action == '12':
+                        elif action == '11':
                             random_event = 0.80
-                        elif action == '13':
+                        elif action == '12':
                             random_event = 0.90
-                        elif action == '14':
+                        elif action == '13':
                             random_event = 0.99
                         else:
                             Print("Please Enter a valid input")
                     except ValueError:
                         random_event = 0.60
-                    
+
+                # Normal random exploration
+                elif player_data['debugging'] == False:
+                    random_event = random.random()
+
+                # Debug manual input
                 else:
                     try:
                         random_event = float(input("Enter: "))
                     except ValueError:
                         random_event = random.random()
+
 
                 if random_event <= 0.05:
                     while True:
@@ -2475,35 +2826,16 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
                                 Print("[Middle Aged Man] There is only 13 cards in the deck ranging from 1-13 with no duplicates, so if you have a 3 that means I cant have a 3")
                                 Print("[Middle Aged Man] Now, are you ready to play?")
                                 input("Press Enter to continue: ")
-                                enemy_name = "Middle Aged Man"
-                                difficulty = "Medium"
-                                play_21(player_data, gold_bet, enemy_name, difficulty)
 
-                            elif action == '2':
-                                enemy_name = "Middle Aged Man"
-                                difficulty = "Medium"
-                                play_21(player_data, gold_bet, enemy_name, difficulty)
+                            Print("\n[Middle Aged Man] Alright, let's start")
+                            enemy_name = "Middle Aged Man"
+                            difficulty = "Medium"
 
-                            else:
-                                Print("Please Enter a valid input")
+                            play_21(player_data, klare_data, difficulty, gold_bet, enemy_name, game_stats)
 
-                            gold_bet += 1
-
-                            game_stats['games_played'] += 1
-
-                            if player_data['gold'] > gold_bet:
-                                Print("[Middle Aged Man] Congratulations Knight... You win!")
-                                Print(f"You win {gold_bet} Gold!!")
-                                player_data['gold'] = int(player_data['gold'] * 1.5)
-                                game_stats['games_won'] += 1
-
-                            else:
-                                Print("[Middle Aged Man] Aww, how about we play again sometime?")
-                                player_data['gold'] = int(player_data['health'] * 0.5)
-                                Print(f"You lost {gold_bet} Gold :(")
-                                game_stats['games_lost'] += 1
-
+                            game_stats['minigames_played'] += 1
                             break
+
                         elif action == '2':
                             Print(f"\n[Knight] Nah, I'd rather keep my {gold_bet} Gold")
                             break
@@ -2540,19 +2872,18 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
                                 weapon['damage'] -= 1
 
                     elif storm_power == 2:
-                        Print("The storm is getting stronger and you feel your body freezing up\n\n-30 Health\n-1 Damage\n-1 Defence")
+                        Print("The storm is getting stronger and you feel your body freezing up\n\n-30 Health\n-1 Weapon Damage\n-1 Armour Defence")
                         player_data['health'] -= 30
                         for weapon in weapons_data:
                             if weapon['name'] == player_data['weapon_equipped']:
                                 weapon['damage'] -= 1
                         for armour in armour_data:
                             if armour['name'] == player_data['armour_equipped']:
-                                player_data['defence'] -= armour['defence']
                                 armour['defence'] -= 1
                                 player_data['defence'] -= 1
 
                     elif storm_power == 3:
-                        Print("The storm's power increases\n\n-20 Health\n-10 Max Health\n-1 Damage")
+                        Print("The storm's power increases\n\n-20 Health\n-10 Max Health\n-1 Weapon Damage")
                         player_data['health'] -= 20
                         player_data['max_health'] -= 10
                         for weapon in weapons_data:
@@ -2560,36 +2891,33 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
                                 weapon['damage'] -= 1
 
                     elif storm_power == 4:
-                        Print("You start feeling the cold through your armour and clothes onto your chest\n\n-10 Health\n-20 Max Health\n-2 Defence")
+                        Print("You start feeling the cold through your armour and clothes onto your chest\n\n-10 Health\n-20 Max Health\n-2 Armour Defence")
                         player_data['health'] -= 10
                         player_data['max_health'] -= 20
                         for armour in armour_data:
                             if armour['name'] == player_data['armour_equipped']:
-                                player_data['defence'] -= armour['defence']
                                 armour['defence'] -= 2
                                 player_data['defence'] -= 2
 
                     elif storm_power == 5:
-                        Print("The storm is getting more powerful and you feel your body freezing up\n\n-35 Health\n-2 Damage\n-2 Defence")
+                        Print("The storm is getting more powerful and you feel your body freezing up\n\n-35 Health\n-2 Weapon Damage\n-2 Armour Defence")
                         player_data['health'] -= 35
                         for weapon in weapons_data:
                             if weapon['name'] == player_data['weapon_equipped']:
                                 weapon['damage'] -= 2
                         for armour in armour_data:
                             if armour['name'] == player_data['armour_equipped']:
-                                player_data['defence'] -= armour['defence']
                                 armour['defence'] -= 2
                                 player_data['defence'] -= 2
 
                     elif storm_power == 6:
-                        Print("The storm is getting too strong and you feel your body freezing up\n\n-40 Health\n-2 Damage\n-3 Defence")
+                        Print("The storm is getting too strong and you feel your body freezing up\n\n-40 Health\n-2 Weapon Damage\n-3 Armour Defence")
                         player_data['health'] -= 40
                         for weapon in weapons_data:
                             if weapon['name'] == player_data['weapon_equipped']:
                                 weapon['damage'] -= 2
                         for armour in armour_data:
                             if armour['name'] == player_data['armour_equipped']:
-                                player_data['defence'] -= armour['defence']
                                 armour['defence'] -= 3
                                 player_data['defence'] -= 3
 
@@ -2599,7 +2927,7 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
                         player_data['strength'] -= 2
 
                     elif storm_power == 8:
-                        Print("The storm gets too strong forcing you to take shelter by hiding in a divot on the otherside of a tree stump to the wind\n\n-25 Max Health\n-3 Strength\n-5 Defence")
+                        Print("The storm gets too strong forcing you to take shelter by hiding in a divot on the otherside of a tree stump to the wind\n\n-25 Max Health\n-3 Strength\n-5 Armour Defence")
                         player_data['max_health'] -= 25
                         player_data['strength'] -= 3
                         for armour in armour_data:
@@ -2609,16 +2937,38 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
                                 
                         check_death(player_data, game_stats)
                         time.sleep(1)
-                        Print("After the storm weakens you force yourself through the storm encountering Bigfoot and are forced to fight him to live.")
+                        Print("After the storm weakens you force yourself through the storm encountering Bigfoot and are forced to fight him.")
                         Print("However, you can quickly access your inventory before he reaches you")
                         inventory_display(player_data, weapons_data, armour_data)
                         fight_boss = True
                         battle(player_data, game_stats)
                         fight_boss = False
                         game_stats['bosses_killed'] += 1
-                        player_data['location'] = 'Swamplands'
+                        player_data['location'] = 'Village of Klare'
                         healed_today = False
-                        break
+                        os.system('cls')
+                        Print("As you leave the storm of the Frozen Peaks you look at Bigfoot's body and feel a sense of accomplishment")
+                        if player_data['day'] < 30:
+
+                            time.sleep(1)
+                            Print("\nYou wander into Klare and are immedietly caught by a guard and taken to a hotel")
+                            time.sleep(1.5)
+                            Print("\n[Guard] The town is current on lockdown due to recent events, you will have to stay here for a while")
+                            time.sleep(1)
+                            Print("\n[Knight] What happend??")
+                            time.sleep(1.5)
+                            Print("\n[Guard] Accomodation is on us, but you will have to stay here until further notice, Goodbye")
+                            time.sleep(1)
+                            Print("\nYou stay in the hotel, eating and resting until the lockdown is lifted")
+
+                            days_passed = 30 - player_data['day']
+                            player_data['day'] = 30
+
+                            print(f"\n{days_passed} days later...")
+                            time.sleep(1)
+                            Print("\n--ANNOUNCEMENT--\n[Unknown] The lockdown has been lifted, I want everybody back to work.")
+
+                        Print("\n------ VILLAGE OF KLARE -----")
 
                     check_death(player_data, game_stats)
                     storm_power += 1
@@ -2673,6 +3023,7 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
                             else:
                                 Print("\nA small creature greets you at the door and invites you in for a meal\nHowever as they shut the door behind you they start swinging their knife!\n\n-25 Health")
                                 player_data['health'] -= 25
+                                check_death(player_data, game_stats)
                                 break
 
                         elif action == '2':
@@ -2683,7 +3034,7 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
 
                 elif random_event <= 0.45:
                     Print("As you push forward you come across a circle in a seemingly random spot in the snow where the storm completely stops. As you enter the circle the sun shines down on you, allowing you to regain your strength and defrost your items!")
-                    Print("\n+15 Max Health\n+35 Health\n+2 Damage\n+1 Armour Defence")
+                    Print("\n+15 Max Health\n+35 Health\n+2 Weapon Damage\n+1 Armour Defence")
                     player_data['max_health'] += 15
                     player_data['health'] += 35
                     if player_data['health'] > player_data['max_health']:
@@ -2727,30 +3078,47 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
                                 Print("\nYou don't have enough Gold so they leave you in the cold :(")
                                 
                         elif action == '3':
-                            Print("You decide not to risk it and continue on in the freezing cold as they ride away")
+                            Print("\nYou decide not to risk it and continue on in the freezing cold as they ride away")
                             break
                         else:
-                            Print("Please Enter a valid input")
+                            Print("\nPlease Enter a valid input")
             
                 elif random_event <= 0.55:
                     while True:
                         Print("[Unknown] I have a proposition for you knight, I shall swap your defence with your strength and give you 100 Gold but increase the power of the storm.\n\n[1] Yes\n[2] No")
                         action = input("Enter: ")
+
                         if action == '1':
                             Print("\n[Unknown] Good choice")
                             time.sleep(0.5)
+
                             Print("\n+100 Gold")
                             player_data['gold'] += 100
+
+                            armour_defence = 0
                             for armour in armour_data:
                                 if armour['name'] == player_data['armour_equipped']:
-                                    temp_defence = (player_data['defence'] - armour['defence'])
-                            player_data['defence'] = player_data['strength']
-                            player_data['strength'] = temp_defence
+                                    armour_defence = armour['defence']
+                                    break
+
+                            # Remove armour first to get base defence
+                            base_defence = player_data['defence'] - armour_defence
+
+                            # Swap base stats
+                            temp = base_defence
+                            base_defence = player_data['strength']
+                            player_data['strength'] = temp
+
+                            # Reapply armour
+                            player_data['defence'] = base_defence + armour_defence
+
                             storm_power += 1
                             break
+
                         elif action == '2':
                             Print("\n[Knight] How about no")
                             break
+
                         else:
                             Print("\nPlease Enter a valid input")
                             
@@ -2794,7 +3162,9 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
                             escape_chance = 100
 
                         # Escape once escape chance hits 100
-                        Print(f"\n---You are currently {escape_chance}% of the way through the storm---\n")
+                        Print(f"\n---You are currently {escape_chance}% of the way through the storm---")
+                        print(f"-You have {player_data['health']} Health Left\n")
+
                         if escape_chance >= 100:
                             Print("\nYou survived long enough for the storm to calm down! Congratulations!\n+3 Strength")
                             storm_power = 0
@@ -2827,7 +3197,7 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
                                 elif action == '3':
                                     random_event = random.random()
                                     
-                                    if random_event <= 0.10:
+                                    if random_event <= 0.05:
                                         Print("You fall into a hole with a clock which takes you back to Day 1 with all your stats and past decisions with extra defence and strength\nDay = 1\n+5 Strength\n+5 Defence")
                                         time.sleep(2)
                                         player_data['day'] = 1
@@ -2860,7 +3230,7 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
                         elif road_luck <= 0.35:  # Hermit Event
                             Print("You come across a Hermit sitting next to a tree.")
                             while True:
-                                action = input("What do you do?\n\n[1] Hear his story\n[2] Skip the story\n[3] Ignore him\nEnter: ")
+                                action = input("What do you do?\n\n[1] Hear his story (30~ seconds)\n[2] Skip the story\nEnter: ")
                                 if action == '1':
                                     PRint("\n[Hermit] Another wanderer, lost in the endless road. Sit. Listen.")
                                     time.sleep(2)
@@ -2893,7 +3263,7 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
                                     player_data['strength'] += 1
                                     player_data['max_health'] += 10
                                     player_data['health'] += 20
-                                    escape_chance = 90
+                                    escape_chance = 100
                                     break
 
                                 elif action == '2':
@@ -2904,12 +3274,7 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
                                     player_data['strength'] += 1
                                     player_data['max_health'] += 10
                                     player_data['health'] += 20
-                                    escape_chance = 90
-                                    break
-
-                                elif action == '3':
-                                    Print("The hermit slowly shakes his head as you walk back into the storm.")
-                                    escape_chance += 10
+                                    escape_chance += 30
                                     break
 
                                 else:
@@ -3050,15 +3415,13 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
                     frozen_peaks_blacksmith(player_data, armour_data, weapons_data, game_stats)
 
                 elif random_event <= 0.99:
-                    frozen_peaks_merchant(player_data, game_stats)
+                    frozen_peaks_merchant(player_data, game_stats, weapons_data, armour_data)
                 else:
                     Print("You found nothing!!") # epic quest
 
             # Player gets the memory game
             elif exploration <= 0.60:
-                Print("\nYou find a small house and decide to enter... You go inside and see a person there to greet you.")
-                Print("You talk for a while and eventually you convince them to join you on your quest to fight the dragon\n+1 Companion")
-                player_data['companions'] += 1
+                play_memory(player_data, game_stats, colours_left, memory_sequence)
 
             # Player walks into a trap
             elif exploration <= 0.70:
@@ -3081,579 +3444,951 @@ def explore_frozen_peaks(player_data, weapons_data, game_stats):
 
             # Player encounters the merchant
             else:
-                frozen_peaks_merchant(player_data, game_stats)
+                frozen_peaks_merchant(player_data, game_stats, weapons_data, armour_data)
+
+            # Adds earned gold to stat
+            track_gold_earned(player_data, before_gold, game_stats)
+
             exploration_time -= 1                   
         else:
             player_data['day'] += 1
 
             # Increase game stat of days survived by 1
             game_stats['days_survived'] += 1
-            
+
+            # theres a bug where it doesnt end. This is the fix I guess
+            picked_events_left = 0
             break
 
 # Frozen Merchant Encounter
-def frozen_peaks_merchant(player_data, game_stats):
-    print("\n-------------------------------------------------------------------------")
-    Print(f"\n-----Snow Merchant-----")
+def frozen_peaks_merchant(player_data, game_stats, weapons_data, armour_data):
+    Print("\n-----Snow Merchant-----")
     Print("[Snow Wanderer] Hello, Knight, What would you like to buy?")
+    
     while True:
         if player_data['weapon_equipped'] not in player_data['owned_weapons']:
             player_data['owned_weapons'].append(player_data['weapon_equipped'])
         if player_data['armour_equipped'] not in player_data['owned_armour']:
             player_data['owned_armour'].append(player_data['armour_equipped'])
-                
-        Print(f"\nYou have {player_data['gold']} Gold")
-        print("\n-----Swords-----\n\n[1] Flame Sword --750 Gold--\n[2] Frost Sword --1.15k Gold--\n\n-----Bows-----\n\n[3] Compound Bow --850 Gold--\n\n-----Spears-----\n\n[4] Eagle Spear --1k Gold--\n\n-----Armour-----\n[5] Yeti Armour --900 Gold--\n[6] Titanium Armour --2.1k Gold--")
-        action = input("\n-----Potions/Crystals-----\n\n[7] Health Potion --250 Gold--\n[8] Health Crystal --600 Gold--\n\n-----Items-----\n\n[9] Enchant Book --1.6k Gold--\n\n[r] Exit ")
-        if action == '1':
-            if player_data['gold'] >= 750:
-                confirmation = input("Press Enter to confirm or ' r ' to Return: ")
-                if confirmation == '':
-                    if "Flame Sword" in player_data['owned_weapons']:
-                        Print("\n[Snow Wanderer] You don't need another Flame Sword I see one on your back!")
-                    else:
-                        Print("\n[Knight] I would like a ☆ Flame Sword ☆  Please")
-                        time.sleep(0.5)
-                        Print("\n-750 Gold")
-                        player_data['gold'] -= 750
-                        player_data['owned_weapons'].append("Flame Sword")
-                        time.sleep(0.5)
-                        Print("\n[Snow Wanderer] Here you go young one")
 
-                        # Increase stat of items bought by 1
-                        game_stats['items_bought'] += 1
-                else:
-                    pass    
-        elif action == '2':
-            if player_data['gold'] >= 1150:
-                confirmation = input("Press Enter to confirm or ' r ' to Return: ")
-                if confirmation == '':
-                    if "Frost Sword" in player_data['owned_weapons']:
-                        Print("\n[Snow Wanderer] You don't need another Frost Sword I see one on your back!")
-                    else:
-                        Print("\n[Knight] I would like a ☆ Frost Sword ☆ to slay the Yeti!")
-                        time.sleep(0.5)
-                        Print("\n-1.15k Gold")
-                        player_data['gold'] -= 1150
-                        player_data['owned_weapons'].append("Frost Sword")
+        print(f"\nYou have {player_data['gold']} Gold")
+        print("\n-----Swords-----\n\n[1] Flame Sword --750 Gold--\n[2] Frost Sword --1.15k Gold--")
+        print("\n-----Bows-----\n\n[3] Compound Bow --850 Gold--")
+        print("\n-----Spears-----\n\n[4] Eagle Spear --1k Gold--")
+        print("\n-----Armour-----\n\n[5] Yeti Armour --900 Gold--\n[6] Titanium Armour --2k Gold--")
+        print("\n-----Potions/Crystals-----\n\n[7] Health Potion --250 Gold--\n[8] Health Crystal --600 Gold--")
+        print("\n-----Items-----\n\n[9] Enchant Book --1.6k Gold--")
+        print("\n[i] View Inventory\n[r] Exit")
+        
+        action = input("\nEnter: ").lower()
 
-                        # Increase stat of items bought by 1
-                        game_stats['items_bought'] += 1
-                else:
-                    pass
+        if action == 'i':
+            inventory_display(player_data, weapons_data, armour_data)
+            continue
 
-        elif action == '3':
-            if player_data['gold'] >= 850:
-                confirmation = input("Press Enter to confirm or ' r ' to Return: ")
-                if confirmation == '':
-                    if "Compound Bow" in player_data['owned_weapons']:
-                        Print("\n[Snow Wanderer] You don't need another Compound Bow I see one on your back!")
-                    else:
-                        Print("\n[Knight] I would like a ☆ Compound Bow ☆ Please")
-                        time.sleep(0.5)
-                        Print("\n-850 Gold")
-                        player_data['gold'] -= 850
-                        player_data['owned_weapons'].append("Compound Bow")
-                        time.sleep(0.5)
-                        Print("\n[Snow Wanderer] Here you go, best to slay those foul beasts from afar.")
+        # -------------------- WEAPONS --------------------
+        if action in ['1', '2', '3', '4']:
 
-                        # Increase stat of items bought by 1
-                        game_stats['items_bought'] += 1
-                else:
-                    pass
-            else:
-                Print("[Snow Wanderer] Sorry but you can't afford this item")
-        elif action == '4':
-            if player_data['gold'] >= 1000:
-                confirmation = input("Press Enter to confirm or ' r ' to Return: ")
-                if confirmation == '':
-                    if "Eagle Spear" in player_data['owned_weapons']:
-                        Print("You already own this")
-                    else:
-                        Print("\n[Knight] Can I have a ☆ Eagle Spear ☆ ??")
-                        Print("\n-1k Gold")
-                        time.sleep(0.5)
-                        Print("\n[Snow Wanderer] Ooh, lucky you it's my last one!")
-                        player_data['gold'] -= 1000
-                        player_data['weapon_equipped'] = "Eagle Spear"
-                        time.sleep(0.5)
-                        Print("[Snow Wanderer] Good luck")
+            weapon_map = {
+                '1': ('Flame Sword', 750),
+                '2': ('Frost Sword', 1150),
+                '3': ('Compound Bow', 850),
+                '4': ('Eagle Spear', 1000)
+            }
 
-                        # Increase stat of items bought by 1
-                        game_stats['items_bought'] += 1
-            else:
-                Print("[Snow Wanderer] Sorry but you can't afford this item")
-            
-        elif action == '5':
-            if player_data['gold'] >= 900:
-                confirmation = input("Enter to confirm or ' r ' to Return: ")
-                if confirmation == '':
-                    if "Yeti Armour" in player_data['owned_armour']:
-                        Print("You already own this")
-                    else:
-                        for armour in armour_data:
-                            if armour['name'] == player_data['armour_equipped']:
-                                player_data['defence'] -= armour['defence']
-                                Print("\n[Knight] Can I have some ☆ Yeti Armour ☆ ?")
-                                Print("\n-900 Gold")
-                                time.sleep(0.5)
-                                Print("\n[Snow Wanderer] I made this one myself! Using the skin of a dead Yeti of course")
-                                player_data['defence'] += 19
-                                player_data['gold'] -= 900
-                                player_data['armour_equipped'] = "Yeti Armour"
-                                time.sleep(0.5)
-                                Print("[Snow Wanderer] Good luck")
+            weapon_name, cost = weapon_map[action]
+            new_weapon = get_weapon_by_name(weapon_name)
 
-                                # Increase stat of items bought by 1
-                                game_stats['items_bought'] += 1
+            if player_data['gold'] < cost:
+                Print("\n[Snow Wanderer] Sorry, you can't afford that.")
+                continue
 
-                                break
-                       
-            else:            
-                Print("[Snow Wanderer] Sorry but you can't afford this item")
-            
-        elif action == '6':
-            if player_data['gold'] >= 2100:
-                confirmation = input("Enter to confirm or ' r ' to Return: ")
-                if confirmation == '':
-                    if "Titanium Armour" in player_data['owned_armour']:
-                        Print("You already own this")
-                    else:
-                        for armour in armour_data:
-                            if armour['name'] == player_data['armour_equipped']:
-                                player_data['defence'] -= armour['defence']
-                                Print("\n[Knight] Can I have some ☆ Titanium Armour ☆ ?")
-                                time.sleep(0.5)
-                                Print("\nThe merchant gives a slow and approving nod")
-                                time.sleep(1)
-                                Print("\n-2.1k Gold")
-                                player_data['defence'] += 31
-                                player_data['gold'] -= 2100
-                                player_data['armour_equipped'] = "Titanium Armour"
-                                time.sleep(0.5)
-                                Print("\n[Snow Wanderer] Good luck in the Frozen Peaks knight 😉")
+            if weapon_name in player_data['owned_weapons']:
+                Print(f"\n[Snow Wanderer] You already carry a {weapon_name}.")
+                continue
 
-                                # Increase stat of items bought by 1
-                                game_stats['items_bought'] += 1
+            Print(f"\n[Knight] I'd like to see the {weapon_name}.")
+            time.sleep(0.5)
 
-                                break                  
-            else:            
-                Print("[Snow Wanderer] Sorry but you can't afford this item")
-            
+            stat_comparison(get_weapon_by_name(player_data['weapon_equipped']), new_weapon, "weapon")
+
+            if input("\nPress Enter to confirm or 'r' to cancel: ") == "":
+                Print(f"\n-{cost} Gold")
+                player_data['gold'] -= cost
+                player_data['owned_weapons'].append(weapon_name)
+
+                Print("\n[Snow Wanderer] Use it well.")
+                game_stats['items_bought'] += 1
+
+
+        # -------------------- ARMOUR --------------------
+        elif action in ['5', '6']:
+
+            armour_map = {
+                '5': ('Yeti Armour', 900),
+                '6': ('Titanium Armour', 2000)
+            }
+
+            armour_name, cost = armour_map[action]
+            selected_armour = get_armour_by_name(armour_name)
+
+            if player_data['gold'] < cost:
+                Print("\n[Snow Wanderer] That's too expensive for you.")
+                continue
+
+            if armour_name in player_data['owned_armour']:
+                Print(f"\n[Snow Wanderer] You already own {armour_name}.")
+                continue
+
+            Print(f"\n[Knight] Could I inspect the {armour_name}?")
+            time.sleep(0.5)
+
+            stat_comparison(get_armour_by_name(player_data['armour_equipped']), selected_armour, "armour")
+
+            if input("\nPress Enter to confirm or 'r' to cancel: ") == "":
+                Print(f"\n-{cost} Gold")
+                player_data['gold'] -= cost
+                player_data['owned_armour'].append(armour_name)
+
+                old_def = get_equipped_armour_defence(player_data, armour_data)
+                player_data['defence'] -= old_def
+
+                player_data['armour_equipped'] = armour_name
+                player_data['defence'] += selected_armour['defence']
+
+                Print("\n[Snow Wanderer] Stay protected.")
+                game_stats['items_bought'] += 1
+
+
+        # -------------------- ITEMS --------------------
         elif action == '7':
-            if player_data['gold'] >= 250:
-                confirmation = input("Press Enter to confirm or ' r ' to Return: ")
-                if confirmation == '':
-                    Print("\n[Knight] One health potion Merchant!")
-                    Print("\n-250 Gold")
-                    print("\n[Snow Merchant] Here you go! Did you know that if you die but have a health potion in your inventory it will use the potion and keep you alive instead? All for 250 gold!")
-                    Print("\n[Snow Wanderer] Is there anything else I can get for you?")
-                    player_data['gold'] -= 250
-                    action = input("\nDo you want to use the potion now?\n\n[1] Yes\n[2] No\nEnter: ")
-                    if action == '1':  
-                        use_health_potion(player_data)
-                    else:
-                        Print("You decide to save it for later in case of an emergency")
-                        player_data['health_potions'] += 1
-                    
-                    # Increase stat of items bought by 1
-                    game_stats['items_bought'] += 1
-            else:            
-                Print("[Snow Wanderer] Sorry but you can't afford this item")  
-                     
+            if player_data['gold'] < 250:
+                Print("\n[Snow Wanderer] Not enough gold.")
+                continue
+
+            Print("\n-----Health Potion Stats-----\n+50 Health")
+            if input("\nPress Enter to confirm or 'r' to cancel: ") == "":
+                player_data['gold'] -= 250
+                player_data['health_potions'] += 1
+                Print("\n[Snow Wanderer] Stay alive.")
+                game_stats['items_bought'] += 1
+
+
         elif action == '8':
-            if player_data['gold'] >= 600:
-                confirmation = input("Press Enter to confirm or ' r ' to Return: ")
-                if confirmation == '':
-                    Print("\n[Knight] Can I have the Health Crystal Please?")
-                    Print("\n-600 Gold")
-                    Print("\n[Snow Wanderer] Sure thing, now you should be ready for anything!")
-                    Print("\nYou stare into the crystal.\n+50 Max Health\n+65 Health")
-                    player_data['gold'] -= 600
-                    player_data['max_health'] += 50
-                    player_data['health'] += 65
+            if player_data['gold'] < 600:
+                Print("\n[Snow Wanderer] You can't afford that.")
+                continue
 
-                    # Increase stat of items bought by 1
-                    game_stats['items_bought'] += 1 
-                    
+            Print("\n-----Health Crystal Stats-----\n+50 Max Health\n+65 Health")
+            if input("\nPress Enter to confirm or 'r' to cancel: ") == "":
+                player_data['gold'] -= 600
+                player_data['max_health'] += 50
+                player_data['health'] += 65
+                Print("\n[Snow Wanderer] Powerful item.")
+                game_stats['items_bought'] += 1
+
+
         elif action == '9':
-            if player_data['gold'] >= 1600:
-                confirmation = input("Press Enter to confirm or ' r ' to Return: ")
-                if confirmation == '':
-                    Print("\n[Knight] Can I an enchant book please?")
-                    Print("\n[Snow Wanderer] Sure, but I can't guarantee it will be good")
-                    Print("\n-1.6k Gold")
-                    random_enchant(player_data, weapons_data) 
-                    player_data['gold'] -= 1600
-                    Print("\n[Merchant] I hope you enjoy your new enchantment")
+            if player_data['gold'] < 1600:
+                Print("\n[Snow Wanderer] It's too pricey for you.")
+                continue
 
-                    # Increase stat of items bought by 1
-                    game_stats['items_bought'] += 1
-            else:        
-                Print("[Snow Wanderer] Sorry but you can't afford this item")
-            
+            if input("\nPress Enter to confirm or 'r' to cancel: ") == "":
+                player_data['gold'] -= 1600
+                random_enchant(player_data, weapons_data)
+                Print("\n[Snow Wanderer] May the enchant serve you.")
+                game_stats['items_bought'] += 1
+
+
         elif action == 'r':
-            Print("\n[Snow Wanderer] I shall see you soon")
-            print("\n-------------------------------------------------------------------------")
+            Print("\n[Snow Wanderer] Safe travels.")
             break
+
         else:
-            Print("Please Enter a valid option") 
-            
+            Print("Invalid option.")
+
 # Blacksmith Shop (Goblin Tinkerer)
 def frozen_peaks_blacksmith(player_data, weapons_data, armour_data, game_stats):
     global upgraded_armour
 
     Print("\n-----Goblin Tinkerer-----")
     Print("[Goblin Tinkerer] Hello Knight, what would ya like?")
+
     while True:
         Print(f"\nGold: {player_data['gold']}")
-        action = input("\n[1] Shop\n[2] Sharpen Sword --350 Gold--\n[3] Upgrade Armour --200 Gold--\n\n[r] Leave\nEnter: ").lower()
+        action = input("\n[1] Shop\n[2] Sharpen Sword --350 Gold--\n[3] Upgrade Armour --200 Gold--\n\n[i] Inventory\n[r] Leave\nEnter: ").lower()
+
+        if action == 'i':
+            inventory_display(player_data, weapons_data, armour_data)
+            continue
+
         if action == '1':
-            Print("\n[Knight] I would like to look at your shop please!")
-            time.sleep(2)
+            Print("\n[Knight] I want to browse your stock.")
+            time.sleep(1)
             os.system('cls')
-            Print("-----Goblin Tinkerer Shop-----")
-            Print("\n[Goblin Tinkerer] Welcome")
+
+            weapon_map = {
+                '1': ('Flame Sword', 600),
+                '2': ('Frost Sword', 1100)
+            }
+
+            armour_map = {
+                '3': ('Yeti Armour', 800),
+                '4': ('Titanium Armour', 1700)
+            }
+
             while True:
-                
-                if player_data['weapon_equipped'] not in player_data['owned_weapons']:
-                    player_data['owned_weapons'].append(player_data['weapon_equipped'])
-                if player_data['armour_equipped'] not in player_data['owned_armour']:
-                    player_data['owned_armour'].append(player_data['armour_equipped'])
-                
-                Print("\n[Goblin Tinkerer] What do you want?")
-                Print(f"\nYou have {player_data['gold']} Gold")
+                Print(f"\nGold: {player_data['gold']}")
 
-                action = input("\n-----Swords-----\n\n[1] Flame Sword --600 Gold--\n[2] Frost Sword --1.1k Gold--\n\n-----Armour-----\n\n[3] Yeti Armour --800 Gold--\n[4] Titanium Armour --2k Gold--\n\n[r] Leave\nEnter: ").lower()
+                action = input(
+                    "\n-----Swords-----\n"
+                    "[1] Flame Sword --600 Gold--\n"
+                    "[2] Frost Sword --1.1k Gold--\n"
+                    "\n-----Armour-----\n"
+                    "[3] Yeti Armour --800 Gold--\n"
+                    "[4] Titanium Armour --1.7k Gold--\n"
+                    "\n[r] Leave\nEnter: "
+                ).lower()
 
-                if action == '1':
-                    if player_data['gold'] >= 600:
-                        confirmation = input("Press Enter to confirm or ' r ' to Return ")
-                        if confirmation == '':
-                            if "Flame Sword" in player_data['owned_weapons']:
-                                Print("\n[Goblin Tinkerer] Already have one")
-                            else:
-                                Print("\n[Knight] I would like an ☆ Flame Sword ☆ Please")
-                                time.sleep(1)
-                                Print("\n-600 Gold")
-                                player_data['gold'] -= 600
-                                player_data['weapon_equipped'] = "Flame Sword"
-                                time.sleep(1)
-                                Print("\n[Goblin Tinkerer] Here")
+                if action in weapon_map:
+                    name, cost = weapon_map[action]
+                    new_weapon = get_weapon_by_name(name)
 
-                                # Increase stat of items bought by 1
-                                game_stats['items_bought'] += 1
-                                    
-                    else:
-                        Print("[Goblin Tinkerer] You are poor") 
-                        
-                elif action == '2':
-                    if player_data['gold'] >= 1100:
-                        confirmation = input("Press Enter to confirm or ' r ' to Return ")
-                        if confirmation == '':
-                            if "Frost Sword" in player_data['owned_weapons']:
-                                Print("\n[Goblin Tinkerer] Only need 1")
-                            else:
-                                Print("\n[Knight] Can I have a ☆ Frost Sword ☆ Please")
-                                Print("\n-1.1k Gold")
-                                player_data['gold'] -= 1100
-                                player_data['weapon_equipped'] = "Frost Sword"
-                                time.sleep(0.5)
-                                Print("\n[Goblin Tinkerer] Good")
+                    if player_data['gold'] < cost:
+                        Print("\n[Goblin Tinkerer] Too poor.")
+                        continue
 
-                                # Increase stat of items bought by 1
-                                game_stats['items_bought'] += 1
-                    else:
-                        Print("[Goblin Tinkerer] Not enough gold") 
+                    Print("\n[Goblin Tinkerer] Look.")
+                    stat_comparison(
+                        get_weapon_by_name(player_data['weapon_equipped']),
+                        new_weapon,
+                        "weapon"
+                    )
 
-                elif action == '3':
-                    if player_data['gold'] >= 800:
-                        confirmation = input("Enter 1 to confirm or ' r ' to Return: ")
-                        if confirmation == '1':
-                            if "Yeti Armour" in player_data['owned_armour']:
-                                Print("You already own this")
-                            else:
-                                for armour in armour_data:
-                                    if armour['name'] == player_data['armour_equipped']:
-                                        player_data['defence'] -= armour['defence']
-                                        Print("\n[Knight] Can I have some ☆ Yeti Armour ☆ ?")
-                                        time.sleep(0.5)
-                                        Print("\nHe heads to the back of the shop and grabs out the Yeti armour")
-                                        time.sleep(1)
-                                        Print("\n-800 Gold")
-                                        player_data['defence'] += 19
-                                        player_data['gold'] -= 800
-                                        player_data['armour_equipped'] = "Yeti Armour"
-                                        time.sleep(0.5)
-                                        Print("\n[Goblin Tinkerer] Come soon")
+                    if input("\nPress Enter to buy or 'r' to cancel: ").lower() == "":
+                        Print(f"\n-{cost} Gold")
+                        player_data['gold'] -= cost
+                        player_data['owned_weapons'].append(name)
 
-                                        # Increase stat of items bought by 1
-                                        game_stats['items_bought'] += 1
+                        game_stats['items_bought'] += 1
 
-                                        break
-                    else:
-                        Print("[Goblin Tinkerer] Not enough") 
 
-                elif action == '4':
-                    if player_data['gold'] >= 2000:
-                        confirmation = input("Enter 1 to confirm or ' r ' to Return ")
-                        if confirmation == '1':
-                            if "Titanium Armour" in player_data['owned_armour']:
-                                Print("You already own this")
-                            else:
-                                for armour in armour_data:
-                                    if armour['name'] == player_data['armour_equipped']:
-                                        player_data['defence'] -= armour['defence']
-                                        Print("\n[Knight] Can I have some ☆ Titanium Armour ☆ ?")
-                                        time.sleep(0.5)
-                                        Print("\nHe looks under the counter and grabs out the titanium armour")
-                                        time.sleep(1)
-                                        Print("\n-2k Gold")
-                                        player_data['defence'] += 31
-                                        player_data['gold'] -= 2000
-                                        player_data['armour_equipped'] = "Titanium Armour"
-                                        time.sleep(0.5)
-                                        Print("\n[Goblin Tinkerer] Come soon")
+                elif action in armour_map:
+                    name, cost = armour_map[action]
+                    new_armour = get_armour_by_name(name)
 
-                                        # Increase stat of items bought by 1
-                                        game_stats['items_bought'] += 1
+                    if player_data['gold'] < cost:
+                        Print("\n[Goblin Tinkerer] Not enough.")
+                        continue
 
-                                        break
+                    stat_comparison(
+                        get_armour_by_name(player_data['armour_equipped']),
+                        new_armour,
+                        "armour"
+                    )
+
+                    if input("\nPress Enter to buy or 'r' to cancel: ").lower() == "":
+                        Print(f"\n-{cost} Gold")
+                        player_data['gold'] -= cost
+                        player_data['owned_armour'].append(name)
+
+                        old_def = get_equipped_armour_defence(player_data, armour_data)
+                        player_data['defence'] -= old_def
+
+                        player_data['armour_equipped'] = name
+                        player_data['defence'] += new_armour['defence']
+
+                        game_stats['items_bought'] += 1
+
 
                 elif action == 'r':
-                    Print("\n[Goblin Tinkerer] Out now\n\n[Knight] I am 😠\n\n[Goblin Tinkerer] Good")
-                    print("\n-------------------------------------------------------------------------")
                     break
+
                 else:
-                    Print("Please Enter a valid input")
-            
+                    Print("Invalid option.")
+
+
         elif action == '2':
-            if player_data['weapon_equipped'] == "Iron Sword" or "Flame Sword":
-                input("\n350 Gold for 4 Extra Damage\nPress Enter to confirm or 'r' to cancel: ")
-                if action == 'r':
-                    pass
-                else:
-                    if player_data['gold'] >= 350:
-                        Print("\n-350 Gold\n+4 Damage")
-                        player_data['gold'] -= 350
-                        for weapon in weapons_data:
-                            if weapon['name'] == player_data['weapon_equipped']:
-                                weapon['damage'] += 4
-                    else:
-                        Print("\n[Goblin Tinkerer] Not for free")
-                    
-            elif player_data['weapon_equipped'] == "Frost Sword":
-                input("\n350 Gold for 2 Extra Damage\nPress Enter to confirm or 'r' to cancel: ")
-                if action == 'r':
-                    pass
-                else:
-                    if player_data['gold'] >= 350:
-                        Print("\n-350 Gold\n+3 Damage")
-                        player_data['gold'] -= 350
-                        for weapon in weapons_data:
-                            if weapon['name'] == player_data['weapon_equipped']:
-                                weapon['damage'] += 2
-                    else:
-                        Print("\n[Goblin Tinkerer] Too expensive for you")
-                    
-            else:
-                Print("\n[Goblin Tinkerer] No, weapon is bad")
-                
+
+            if player_data['gold'] < 350:
+                Print("\n[Goblin Tinkerer] No freebies.")
+                continue
+
+            if input("\n350 Gold for +4 Damage\nPress Enter to confirm or 'r' to cancel: ") == "":
+                player_data['gold'] -= 350
+
+                for weapon in weapons_data:
+                    if weapon['name'] == player_data['weapon_equipped']:
+                        weapon['damage'] += 4
+                        break
+
+                Print("\n[Goblin Tinkerer] Sharpened.")
+
+
         elif action == '3':
-            if player_data['gold'] >= 200:
-                if upgraded_armour == False:
-                    if player_data['armour_equipped'] == "No Armour" or player_data["armour_equipped"] == "Cloth Armour":
-                        Print("\n[Goblin Tinkerer] What armour?")
-                    else:
-                        Print("\n[Knight] Can you upgrade my armour?")
-                        time.sleep(1)
-                        Print("\n[Goblin Tinkerer] Give")
-                        time.sleep(2)
-                        Print("\n[Knight] Sure\n-200 Gold")
-                        time.sleep(2)
-                        Print("\n*tink *tink")
-                        time.sleep(0.6)
-                        Print("*bink *bam")
-                        Print("\n[Goblin Tinkerer] Here\n+2 Armour Defence\n")
-                        player_data['gold'] -= 200
-                        upgraded_armour = True
-                        for armour in armour_data:
-                            if armour['name'] == player_data['armour_equipped']:
-                                armour['defence'] += 2
-                                player_data['defence'] += 2 
-                                break           
-                else:
-                    Print("\n[Goblin Tinkerer] Not again")
-            else:
-                Print("[Goblin Tinkerer] Not free knight")
-                
+
+            if player_data['gold'] < 200:
+                Print("\n[Goblin Tinkerer] Bring more gold.")
+                continue
+
+            if upgraded_armour:
+                Print("\n[Goblin Tinkerer] Already done.")
+                continue
+
+            if player_data['armour_equipped'] in ["No Armour", "Cloth Armour"]:
+                Print("\n[Goblin Tinkerer] No armour to upgrade.")
+                continue
+
+            player_data['gold'] -= 200
+            upgraded_armour = True
+
+            for armour in armour_data:
+                if armour['name'] == player_data['armour_equipped']:
+                    armour['defence'] += 2
+                    player_data['defence'] += 2
+                    break
+
+            Print("\n[Goblin Tinkerer] Armour improved.")
+
+
         elif action == 'r':
-            Print("\n[Goblin Tinkerer] Bye Knight")
+            Print("\n[Goblin Tinkerer] Bye Knight.")
             break
 
-# -- Swamplands -- #
+        else:
+            Print("Invalid option.")
 
-# Swamplands Enemies list
-def enemy_data_swamplands():
-    leech = {"name": "Leech", "health": 60, "strength": 15, "gold": 15}
-    cursed_lilypad = {"name": "Cursed Lillypad", "health": 135, "strength": 39, "gold": 50}
-    witch = {"name": "Witch", "health": 130, "strength": 75, "gold": 70}
-    arc = {"name": "ARC", "health": 165, "strength": 55, "gold": 80}
-    rotwood = {"name": "Rotwood", "health": 250, "strength": 200, "gold": 100}
-    zombie = {"name": "Zombie", "health": 300, "strength": 17, "gold": 90}
-    skin_walker = {"name": "Skin Walker", "health": 133, "strength": 300, "gold": 150}
-    devil = {"name": "Devil", "health": 1000, "strength": 100, "gold": 1000}
-    
-    random_enemy = random.random()
-    if random_enemy < 0.20:
-        current_enemy = leech # 20%
-    elif random_enemy < 0.40:
-        current_enemy = cursed_lilypad # 20%
-    elif random_enemy < 0.60:
-        current_enemy = witch # 20%
-    elif random_enemy < 0.75:
-        current_enemy = arc # 15%
-    elif random_enemy < 0.86:
-        current_enemy = rotwood # 11%
-    elif random_enemy < 0.93:
-        current_enemy = zombie # 7%
-    elif random_enemy < 0.99:
-        current_enemy = skin_walker # 6%
-    else:
-        current_enemy = devil # 1%
+# -- Village of Klare -- #
+
+# Gamble Hall villager data
+def klare_villager_data():
+    villagers = [
+
+        # Easy
+        {"name": "Joe", "gold": 20, "difficulty": "Easy"},
+        {"name": "Bob", "gold": 25, "difficulty": "Easy"},
+        {"name": "Frank", "gold": 35, "difficulty": "Easy"},
+        {"name": "Sue", "gold": 25, "difficulty": "Easy"},
+        {"name": "Tom", "gold": 30, "difficulty": "Easy"},
+        {"name": "Lily", "gold": 40, "difficulty": "Easy"},
+        {"name": "Max", "gold": 33, "difficulty": "Easy"},
+        {"name": "Emma", "gold": 50, "difficulty": "Easy"},
+
+        # Medium
+        {"name": "Oliver", "gold": 60, "difficulty": "Medium"},
+        {"name": "Mia", "gold": 75, "difficulty": "Medium"},
+        {"name": "Liam", "gold": 65, "difficulty": "Medium"},
+        {"name": "Sophia", "gold": 70, "difficulty": "Medium"},
+        {"name": "Noah", "gold": 55, "difficulty": "Medium"},
+        {"name": "Albert", "gold": 85, "difficulty": "Medium"},
+        {"name": "Ethan", "gold": 100, "difficulty": "Medium"},
+
+        # Hard
+        {"name": "Charlotte", "gold": 150, "difficulty": "Hard"},
+        {"name": "Jack", "gold": 280, "difficulty": "Hard"},
+        {"name": "Amelia", "gold": 230, "difficulty": "Hard"},
+        {"name": "Henry", "gold": 250, "difficulty": "Hard"},
+        {"name": "Isabella", "gold": 330, "difficulty": "Hard"},
         
-    return current_enemy
+    ]
 
-# Player Explores Swamplands
-def explore_swamplands(player_data):
-    exploration_time = random.randint(3, 6) # How many events the player in encounter
-    while True:
-        if exploration_time > 0:
-            exploration = random.random() # What event the player will encounter
-            # Player comes back with nothing
-            if exploration < 0.35:
-                Print("\nYou came back empty handed")
-                exploration_time -= 1
-            # Player finds a shrine
-            elif exploration < 0.45:
-                Print("\nYou uncover a mysterious shrine!")
-                Print("[1] Investigate [2] Leave")
-                action = input("Enter: ")
-                if action == '1':
-                    shrine_luck = random.random() # What happens when the player touches the shrine
-                    if shrine_luck < 0.33:
-                        Print("\nYou feel a warm sensation cover your body +35 Health +5 Max Health")
-                        player_data['max_health'] += 5
-                        player_data['health'] += 35
-                        exploration_time -= 1
-                    elif shrine_luck < 0.66:
-                        Print("\nYou feel a figure touch your shoulder...")
-                        time.sleep(3)
-                        Print("\nBefore you can catch a glimpse, it disappears into the trees and you hope that nothing bad happened")
-                        player_data['max_health'] -= 10
-                        exploration_time -= 1
-                    else:
-                        Print("\nYou feel lucky +30 Gold")
-                        player_data['gold'] += 30
-                        exploration_time -= 1
-                elif action == '2':
-                    Print("\nYou leave the shrine and continue on")
-                    exploration_time -= 1
-            # Player walks into a trap
-            elif exploration < 0.55:
-                Print("\nYou walked into a trap!")
-                trap_luck = random.random()
-                if trap_luck < 0.40:
-                    Print("\nYou fell into a hole and took 10 Damage")
-                    player_data['health'] -= 10
-                    exploration_time -= 1
-                elif trap_luck < 0.80:
-                    Print("\nYou got hit by a falling log and took 30 Damage")
-                    player_data['health'] -= 30
-                    exploration_time -= 1
-                else:
-                    Print("\nHaha just kidding there was no trap there but you did find an apple + 5 Health")
-                    player_data['health'] += 5
-                    exploration_time -= 1
-            # Player finds an enemy
-            elif exploration < 0.90:
-                battle(player_data, game_stats)
-                exploration_time -= 1
-            # Player encounters the merchant
-            else:
-                swamplands_merchant(player_data)
-                exploration_time -= 1                   
-        else:
+    Baron = {"name": "Baron", "health": 1000, "strength": 145, "gold": 0}
+
+    global fight_boss
+
+    if fight_boss == True:
+        current_enemy = Baron
+
+    return current_enemy, villagers
+
+# Klare main menu
+def explore_klare(player_data, weapons_data, armour_data, klare_data):
+    global current_hour
+
+    Print("\n----- Village of Klare -----")
+
+    intro_dialogue = [
+        "You leave your cozy house and walk out into the sun, ready for a great day",
+        "As you close the door, you look out to the rainy weather",
+        "You look out the window and can barely see 10 meters infront of you, its going to be foggy today"
+    ]
+
+    current_hour = 9
+    current_minute = 0
+
+    Print(random.choice(intro_dialogue))
+    time.sleep(2)
+
+    while current_hour < 17:
+
+        print(f"\nCurrent Time: {current_hour}:{current_minute:02d}")
+        print("\n----- Choices -----")
+        print("🗣️  [1] Talk to Villagers")
+        print("💵 [2] Visit the Minigame Hall")
+        print("🎪 [3] Go to the Town Merchant")
+        print("❓ [4] How to play each minigame")
+        print("🚪 [r] Return Home (End day early)")
+        action = input("Enter: ")
+
+        if action == '1':
+            talk_to_villagers(player_data)
+            current_hour, current_minute = advance_time(current_hour, current_minute, 10)
+
+        elif action == '2':
+            minigame_hall(player_data, klare_data)
+            
+
+        elif action == '3':
+            klare_merchant(player_data, weapons_data, armour_data)
+
+        elif action == '4':
+            os.system('cls')
+            print("\n----- Minigame Instructions -----")
+            print("\n---Rock Paper Scissors---")
+            print("-You can type 'Rock', 'Paper' or 'Scissors'.")
+            print("-OR you can type 'r', 'p', 's'. Capital or not, doesnt matter")
+            print("\n---Twenty One---")
+            print("-The rules are not to reach 21 without exceeding it.")
+            print("-Trump cards can modify the target score, for example changing it to 24.")
+            print("-A trump card may also lower the target score, such as reducing it to 17, which can immediately place an opponent over the limit target score.")
+            print("-Each player draws a hidden card at the start of the round.")
+            print("-If one player exceeds the target score while the other remains below it, the player under the target wins automatically. If both players exceed the target, the winner is the one closest to it.")
+            print("-The deck contains 13 cards numbered 1 through 13 with no duplicates, so if one card is in a player's hand it cannot appear in the opponent's hand.")
+            print("\n---Higher or Lower---")
+            print("-Guess if the next number is going to be below the 'Current Number: ' or higher than it. Thats bout it ¯\_(ツ)_/¯")
+            print("\n---Liar's Dice---")
+            print("-Enter bids as two numbers: quantity then face (e.g., 3 5). Meaning you claim there is atleast 3 dice with the face of 5 across all board")
+            print("-You cannot lower a bid’s quantity or face value.")
+            print("-You can always call bluff instead of raising.")
+            print("-The active player is highlighted in green at the top of the screen.")
+            print("-Eliminated players are permanently out, no respawns, no spare dice.")
+
+        elif action == 'r':
+            tax = int(player_data['gold'] * 0.12)
+            player_data['gold'] -= tax
+
+            Print(f"\n**The Baron takes his cut of your total gold. -{tax} Gold**")
+            Print("\nYou head home early and rest until the next morning")
+
             player_data['day'] += 1
+            return
+
+        else:
+            Print("\nPlease enter a valid input.")
+
+        while current_minute >= 60:
+            current_minute -= 60
+            current_hour += 1
+
+        if current_hour >= 17:
             break
 
-# Forest Merchant Encounter
-def swamplands_merchant(player_data):
-    while True:
-        Print("\n[Merchant] Hello I am a merchant what would you like to buy?")
-        Print(f"\nYou have {player_data['gold']} Gold")
-        action = input("\n-----Swords-----\n\n[1] Steel Sword --300 Gold--\n[2] Flame Sword --650 Gold--\n\n-----Spears-----\n\n[3] Eagle Spear --650 Gold--\n\n-----Potions/Crystals-----\n\n[4] Health Potion --100 Gold--\n[5] Health Crystal --600 Gold--\n\n[r] Exit ")
+    if current_hour >= 17:
+        tax = int(player_data['gold'] * 0.12)
+        player_data['gold'] -= tax
+
+        Print(f"**The Baron takes his cut of your total gold. -{tax} Gold**")
+        Print(f"\nThe village bell rings, it’s {current_hour}:00 PM. You head home")
+
+        player_data['day'] += 1
+
+# Function to play minigames against villagers
+def minigame_hall(player_data, klare_data):
+
+    global current_hour
+    # Checks if the player wants to buy a pass or if they already have a lifetime pass
+    if klare_data['basic_pass'] == False and klare_data['day_pass'] == False:
+
+        while True:
+
+            Print("\n[Guard] 60 gold to enter or 500 gold for a lifetime pass")
+            Print("\n[1] Pay Entry Fee\n[2] Purchase a lifetime pass\n[r] Exit")
+            action = input("Enter: ")
+            
+            if action == '1':
+                Print("\n[Knight] Yes, here is 60 gold")
+                if player_data['gold'] >= 60:
+                    Print("-60 Gold")
+                    Print("\n[Guard] You may enter")
+                    player_data['gold'] -= 60
+                    klare_data['day_pass'] = True
+                    break
+                
+                else:
+                    Print("\n[Guard] Thats not enough, best you get out of here")
+            
+            elif action == '2':
+                Print("\n[Knight] Can I get a lifetime pass?")
+                if klare_data['basic_pass'] == False:
+                    if player_data['gold'] >= 350:
+                        Print("-350 Gold")
+                        Print("\n[Guard] Yeah sure, heres a lifetime pass man")
+                        klare_data['basic_pass'] = True
+                        klare_data['day_pass'] = True
+                        player_data['gold'] -= 350
+                        break
+
+                    else:
+                        Print("\n[Guard] Thats not enough, best you get a single pass")
+                else:
+                    Print("[Guard] You already have one...? How did you get to this message??")
+
+            elif action == 'r':
+                Print("[Knight] Actually maybe not")
+                break
+
+            else:
+                Print("\nPlease Enter a valid input")
+                
+            
+    elif klare_data['basic_pass'] == True:
+        Print("\n[Guard] Alright, head in")
+        klare_data['day_pass'] = True
+        time.sleep(1.5)
+        os.system('cls')
+
+    print("\n-------------------------------------------------")
+
+    while klare_data['day_pass'] == True:
+
+        if current_hour >= 17:
+            break
+        
+        print(f"\nGold: {player_data['gold']}")
+        print("\n-----Minigame Hall-----")
+        print(f"🟩 [1] Easy ({GREEN}unlocked{RESET})")
+
+        # Medium unlocks when all easy villagers beaten
+        easy_unlocked = len(klare_data['easy_beaten']) == 8
+        print(f"🟨 [2] Medium {f'({RED}locked{RESET})' if not easy_unlocked else f'({GREEN}unlocked{RESET})'}")
+
+        # Hard unlocks when all medium villagers beaten
+        medium_unlocked = len(klare_data['medium_beaten']) == 7
+        print(f"🟥 [3] Hard {f'({RED}locked{RESET})' if not medium_unlocked else f'({GREEN}unlocked{RESET})'}")
+
+        print("🔎 [4] View Opponents Beaten")
+        print("🚪 [r] Exit Minigame Hall")
+        action = input("Enter: ")
+
+        if player_data['gold'] < 20:
+            minimum_bet = 1
+        else:
+            minimum_bet = 20
+
+        # Easy difficulty
         if action == '1':
-            if player_data['gold'] >= 300:
-                confirmation = input("Press Enter to confirm or ' r ' to Return ")
-                if confirmation == '':
-                    if "Steel Sword" in player_data['owned_weapons']:
-                        Print("\n[Merchant] You don't need another Steel Sword I see one on your back!")
-                    else:
-                        Print("\n[Knight] I would like an ☆ Steel Sword ☆  Please")
-                        time.sleep(0.5)
-                        Print("\n-300 Gold")
-                        player_data['gold'] -= 300
-                        player_data['owned_weapons'].append("Steel Sword")
-                        time.sleep(0.5)
-                        Print("\n[Merchant] Here you go young one")
-                else:
-                    pass    
+
+            # check whether player has over 50 gold to play liarsdice and select a random game
+            if player_data['gold'] >= 50:
+                random_game = random.choice(["rps", "21", "higherlower", "liarsdice"])
+            else:
+                random_game = random.choice(["rps", "21", "higherlower"])
+
+            # setup difficulty and enemy names
+            difficulty = "easy"
+            enemy_name = random.choice(["Joe", "Bob", "Frank", "Sue", "Tom", "Lily", "Max", "Emma"])
+            
+            # Setup max bets on minigames and reducing it if the player has under the gold amount
+            if player_data['gold'] >= 100:
+                rps_max = 75
+            else:
+                rps_max = player_data['gold']
+
+            if player_data['gold'] >= 115:
+                twentyone_max = 115
+            else:
+                twentyone_max = player_data['gold']
+
+            if player_data['gold'] >= 35:
+                higherlower_max = 35
+            else:
+                higherlower_max = player_data['gold']
+
+            # Allow debug mode to select the game
+            if player_data['debugging'] == True:
+                random_game = input("Which game? (rps/21/higherlower/liarsdice): ").lower()
+
+            # play a random minigame
+            if random_game == "rps":
+
+                gold_bet = random.randint(minimum_bet, rps_max)
+                
+                Print(f"\nYou will play Rock Paper Scissors against {enemy_name} for {gold_bet} gold")
+
+                play_rps(player_data, klare_data, difficulty, gold_bet, enemy_name, game_stats)
+
+            elif random_game == "21":
+
+                gold_bet = random.randint(minimum_bet, twentyone_max)
+
+                Print(f"\nYou will play a game of 21 against {enemy_name} for {gold_bet} gold")
+
+                play_21(player_data, klare_data, difficulty, gold_bet, enemy_name, game_stats)
+
+            elif random_game == "higherlower":
+
+                while True:
+                
+                    gold_bet = random.randint(minimum_bet, higherlower_max)
+
+                    Print(f"\nYou will play Higher or Lower starting with {gold_bet} gold")
+                    play_higherlower(player_data, klare_data, difficulty, gold_bet, game_stats)
+                    break
+
+            elif random_game == "liarsdice":
+
+                gold_bet = 50
+                enemy_count = 5 # only pick 5 of the 8 names
+                enemy_names = ["Joe", "Bob", "Frank", "Sue", "Tom", "Lily", "Max", "Emma"]
+
+                Print(f"\nYou will play Liars Dice against {enemy_count} others for {gold_bet * enemy_count} gold")
+
+                play_liars_dice(player_data, klare_data, enemy_count, difficulty, game_stats, gold_bet, enemy_names)
+            
+            current_hour += random.randint(1, 3)
+
+        # Medium difficulty
         elif action == '2':
-            if player_data['gold'] >= 650:
-                confirmation = input("Press Enter to confirm or ' r ' to Return ")
-                if confirmation == '':
-                    if "Flame Sword" in player_data['owned_weapons']:
-                        Print("\n[Merchant] You don't need another Flame Sword I see one on your back!")
-                    else:
-                        Print("\n[Knight] I would like an ☆ Flame Sword ☆  Please")
-                        player_data['gold'] -= 650
-                        player_data['owned_weapons'].append("Flame Sword")
+            if len(klare_data['easy_beaten']) == 8:
+
+                # check whether player has over 75 gold to play liarsdice and select a random game
+                if player_data['gold'] >= 75:
+                    random_game = random.choice(["rps", "21", "higherlower", "liarsdice"])
                 else:
-                    pass
+                    random_game = random.choice(["rps", "21", "higherlower"])
+
+                # setup difficulty and enemy names
+                difficulty = "medium"
+                enemy_name = random.choice(["Oliver", "Mia", "Liam", "Sophia", "Noah", "Albert", "Ethan"])
+                
+                # Setup max bets on minigames and reducing it if the player has under the gold amount
+                if player_data['gold'] >= 125:
+                    rps_max = 125
+                else:
+                    rps_max = player_data['gold']
+
+                if player_data['gold'] >= 250:
+                    twentyone_max = 250
+                else:
+                    twentyone_max = player_data['gold']
+
+                if player_data['gold'] >= 50:
+                    higherlower_max = 50
+                else:
+                    higherlower_max = player_data['gold']
+
+                # Allow debug mode to select the game
+                if player_data['debugging'] == True:
+                    random_game = input("Which game? (rps/21/higherlower/liarsdice): ").lower()
+
+                # Pick a game
+                if random_game == "rps":
+
+                    gold_bet = random.randint(minimum_bet, rps_max)
+                    
+                    Print(f"\nYou will play Rock Paper Scissors against {enemy_name} for {gold_bet} gold")
+
+                    play_rps(player_data, klare_data, difficulty, gold_bet, enemy_name, game_stats)
+
+                elif random_game == "21":
+
+                    gold_bet = random.randint(minimum_bet, twentyone_max)
+
+                    Print(f"\nYou will play a game of 21 against {enemy_name} for {gold_bet} gold")
+
+                    play_21(player_data, klare_data, difficulty, enemy_name, game_stats)
+
+                elif random_game == "higherlower":
+
+                    while True:
+                    
+                        gold_bet = random.randint(minimum_bet, higherlower_max)
+
+                        Print(f"\nYou will play Higher or Lower starting with {gold_bet} gold")
+                        play_higherlower(player_data, klare_data, difficulty, gold_bet, game_stats)
+                        break
+
+                elif random_game == "liarsdice":
+
+                    gold_bet = 90
+                    enemy_count = 5
+                    enemy_names = ["Oliver", "Mia", "Liam", "Sophia", "Noah", "Ava", "Ethan"]
+
+                    Print(f"\nYou will play Liars Dice against {enemy_count} others for {gold_bet * enemy_count} gold")
+
+                    play_liars_dice(player_data, klare_data, enemy_count, difficulty, enemy_names, game_stats)
+                
+                current_hour += random.randint(1, 3)
+
+            else:
+                Print("\nYou need to beat all of the 'Easy Tier' villagers first")
+
         elif action == '3':
-            if player_data['gold'] >= 650:
-                confirmation = input("Press Enter to confirm or ' r ' to Return ")
-                if confirmation == '':
-                    if "Hunting Bow" in player_data['owned_weapons']:
-                        Print("You already own this")
-                    else:
-                        player_data['gold'] -= 650
-                        player_data['owned_weapons'].append("Hunting Bow ")
+            if len(klare_data['medium_beaten']) == 7:
+
+                # check whether player has over 150 gold to play liarsdice and select a random game
+                if player_data['gold'] >= 150:
+                    random_game = random.choice(["rps", "21", "higherlower", "liarsdice"])
                 else:
-                    pass
+                    random_game = random.choice(["rps", "21", "higherlower"])
+
+                # setup difficulty and enemy names
+                difficulty = "medium"
+                enemy_name = random.choice(["Oliver", "Mia", "Liam", "Sophia", "Noah", "Ava", "Ethan"])
+                
+                # Setup max bets on minigames and reducing it if the player has under the gold amount
+                if player_data['gold'] >= 150:
+                    rps_max = 150
+                else:
+                    rps_max = player_data['gold']
+
+                if player_data['gold'] >= 300:
+                    twentyone_max = 300
+                else:
+                    twentyone_max = player_data['gold']
+
+                if player_data['gold'] >= 50:
+                    higherlower_max = 50
+                else:
+                    higherlower_max = player_data['gold']
+
+                # Allow debug mode to select the game
+                if player_data['debugging'] == True:
+                    random_game = input("Which game? (rps/21/higherlower/liarsdice): ").lower()
+
+                # Pick a game
+                if random_game == "rps":
+
+                    gold_bet = random.randint(minimum_bet, rps_max)
+                    
+                    Print(f"\nYou will play Rock Paper Scissors against {enemy_name} for {gold_bet} gold")
+
+                    play_rps(player_data, klare_data, difficulty, gold_bet, enemy_name, game_stats)
+
+                elif random_game == "21":
+
+                    gold_bet = random.randint(minimum_bet, twentyone_max)
+
+                    Print(f"\nYou will play a game of 21 against {enemy_name} for {gold_bet} gold")
+
+                    play_21(player_data, klare_data, difficulty, enemy_name, game_stats)
+
+                elif random_game == "higherlower":
+
+                    while True:
+                    
+                        gold_bet = random.randint(minimum_bet, higherlower_max)
+
+                        Print(f"\nYou will play Higher or Lower starting with {gold_bet} gold")
+
+                        play_higherlower(player_data, klare_data, difficulty, gold_bet, game_stats)
+                        break
+
+                elif random_game == "liarsdice":
+
+                    gold_bet = 150
+                    enemy_count = 5
+                    enemy_names = ["Charlotte", "Jack", "Amelia", "Henry", "Isabella"]
+
+                    Print(f"\nYou will play Liars Dice against {enemy_count} others for {gold_bet * enemy_count} gold")
+
+                    play_liars_dice(player_data, klare_data, enemy_count, difficulty, enemy_names, game_stats)
+                
+                current_hour += random.randint(1, 3)
+
+            else:
+                Print("\nYou need to beat all of the 'Medium Tier' villagers first")
+
         elif action == '4':
-            if player_data['gold'] >= 150:
-                confirmation = input("Press Enter to confirm or ' r ' to Return ")
-                if confirmation == '':
-                    possible_health = player_data['max_health'] - player_data['health']
-                    if possible_health > 150:
-                        use_health_potion(player_data)
-                else:
-                    pass
-        elif action == '5':
-            if player_data['gold'] >= 600:
-                confirmation = input("Press Enter to confirm or ' r ' to Return ")
-                if confirmation == '':
-                    Print("You stared into the crystal and gained 35 MAX health")
-                    player_data['max_health'] += 35
-                    player_data['health'] += 35   
-                else:
-                    pass
+            os.system('cls')
+            print("-----Villagers Beaten-----")
+
+            print("\nEasy Tier:")
+            for name in ["Joe", "Bob", "Frank", "Sue", "Tom", "Lily", "Max", "Emma"]:
+                status = f"({GREEN}BEATEN{RESET})" if name in klare_data['easy_beaten'] else f"({RED}UNBEATEN{RESET})"
+                print(f"{name}: {status}")
+
+            print("\nMedium Tier:")
+            for name in ["Oliver", "Mia", "Liam", "Sophia", "Noah", "Albert", "Ethan"]:
+                status = f"({GREEN}BEATEN{RESET})" if name in klare_data['medium_beaten'] else f"({RED}UNBEATEN{RESET})"
+                print(f"{name}: {status}")
+
+            print("\nHard Tier:")
+            for name in ["Charlotte", "Jack", "Amelia", "Henry", "Isabella"]:
+                status = f"({GREEN}BEATEN{RESET})" if name in klare_data['hard_beaten'] else f"({RED}UNBEATEN{RESET})"
+                print(f"{name}: {status}")
+
+            input("\nPress Enter to return: ")
+            os.system('cls')
+
         elif action == 'r':
             break
+
         else:
-            Print("Please Enter a valid input") 
+            Print("\nPlease Enter a valid input")
+
+# Klare Merchant
+def klare_merchant(player_data, weapons_data, armour_data):
+    Print("\n-----Klare Merchant-----")
+    Print("[Old Merchant] Hello, Knight, What would you like to buy?")
+    
+    while True:
+        if player_data['weapon_equipped'] not in player_data['owned_weapons']:
+            player_data['owned_weapons'].append(player_data['weapon_equipped'])
+        if player_data['armour_equipped'] not in player_data['owned_armour']:
+            player_data['owned_armour'].append(player_data['armour_equipped'])
+
+        print(f"\nYou have {player_data['gold']} Gold")
+
+        print("\n-----Swords-----\n\n[1] Shadow Blade --3.3k Gold--")
+        print("\n-----Bows-----\n\n[2] Composite Bow --4k Gold--")
+        print("\n-----Spears-----\n\n[3] Rock Spear --3.5k Gold--\n[4] Baron's Spear --4.5k Gold--")
+        print("\n-----Armour-----\n\n[5] Ash Armour --4.2k Gold--\n[6] Dragonite Armour --5.2k Gold--")
+        print("\n-----Potions/Crystals-----\n\n[7] Health Potion --1k Gold--\n[8] Max Health Potion --1.7k Gold--")
+        print("\n-----Items-----\n\n[9] Enchant Book --3.7k Gold--")
+        print("\n[i] View Inventory\n[r] Exit")
+        
+        action = input("\nEnter: ").lower()
+
+
+        # ----------------- Inventory -----------------
+        if action == 'i':
+            inventory_display(player_data, weapons_data, armour_data)
+            continue
+
+
+        # ----------------- Weapons -----------------
+        if action in ['1','2','3','4']:
+            weapon_map = {
+                '1': ('Shadow Blade', 4100),
+                '2': ('Composite Bow', 3100),
+                '3': ('Rock Spear', 3500),
+                '4': ("Baron's Spear", 4200)
+            }
+
+            weapon_name, cost = weapon_map[action]
+            new_weapon = get_weapon_by_name(weapon_name)
+
+            if player_data['gold'] < cost:
+                Print("\n[Old Merchant] Sorry but you can't afford this item.")
+                continue
+
+            if weapon_name in player_data['owned_weapons']:
+                Print(f"\n[Old Merchant] You already own the {weapon_name}.")
+                continue
+
+            Print(f"\n[Knight] I would like to see your {weapon_name}, please.")
+            time.sleep(0.4)
+
+            stat_comparison(
+                get_weapon_by_name(player_data['weapon_equipped']),
+                new_weapon,
+                "weapon"
+            )
+
+            if input("\nPress Enter to confirm or 'r' to cancel: ").lower() == "r":
+                Print("\n[Old Merchant] No worries, perhaps another time.")
+                continue
+
+            Print(f"\n-{cost} Gold")
+            player_data['gold'] -= cost
+            player_data['owned_weapons'].append(weapon_name)
+
+            Print("\n[Old Merchant] Here you go, young one.")
+            game_stats['items_bought'] += 1
+
+
+        # ----------------- Armour -----------------
+        elif action in ['5','6']:
+            armour_map = {
+                '5': ("Ash Armour", 4200),
+                '6': ('Dragonite Armour', 5200)
+            }
+
+            armour_name, cost = armour_map[action]
+            new_armour = get_armour_by_name(armour_name)
+
+            if player_data['gold'] < cost:
+                Print("\n[Old Merchant] Sorry but you can't afford this item.")
+                continue
+
+            if armour_name in player_data['owned_armour']:
+                Print(f"\n[Old Merchant] You already own {armour_name}.")
+                continue
+
+            Print(f"\n[Knight] May I try on your {armour_name}?")
+            time.sleep(0.4)
+
+            stat_comparison(
+                get_armour_by_name(player_data['armour_equipped']),
+                new_armour,
+                "armour"
+            )
+
+            if input("\nPress Enter to confirm or 'r' to cancel: ").lower() == "r":
+                Print("\n[Old Merchant] Very well, knight.")
+                continue
+
+            Print(f"\n-{cost} Gold")
+            player_data['gold'] -= cost
+            player_data['owned_armour'].append(armour_name)
+
+            old_def = get_equipped_armour_defence(player_data, armour_data)
+            player_data['defence'] -= old_def
+
+            player_data['armour_equipped'] = armour_name
+            player_data['defence'] += new_armour['defence']
+
+            Print("\n[Old Merchant] May it protect you in every battle ahead!")
+            game_stats['items_bought'] += 1
+
+
+        # ----------------- Items -----------------
+        elif action == '7':
+            if player_data['gold'] < 1000:
+                Print("\n[Old Merchant] Sorry but you can't afford this item.")
+                continue
+
+            Print("\n-----Health Potion Stats-----\n+100 Health")
+            if input("\nPress Enter to confirm or 'r' to cancel: ") == "":
+                player_data['gold'] -= 1000
+                player_data['health_potions'] += 1
+                Print("\n[Old Merchant] Stay alive out there.")
+                game_stats['items_bought'] += 1
+
+
+        elif action == '8':
+            if player_data['gold'] < 1700:
+                Print("\n[Old Merchant] Sorry but you can't afford this item.")
+                continue
+
+            Print("\n-----Max Health Potion Stats-----\n+80 Max Health")
+            if input("\nPress Enter to confirm or 'r' to cancel: ") == "":
+                player_data['gold'] -= 1700
+                player_data['max_health'] += 80
+                Print("\n[Old Merchant] Your strength grows.")
+                game_stats['items_bought'] += 1
+
+
+        elif action == '9':
+            if player_data['gold'] < 3700:
+                Print("\n[Old Merchant] Sorry but you can't afford this item.")
+                continue
+
+            if input("\nPress Enter to confirm or 'r' to cancel: ") == "":
+                player_data['gold'] -= 3700
+                random_enchant(player_data, weapons_data)
+                Print("\n[Old Merchant] I hope you enjoy your enchantment.")
+                game_stats['items_bought'] += 1
+
+
+        elif action == 'r':
+            Print("\n[Old Merchant] I shall see you soon.")
+            print("\n-------------------------------------------------------------------------")
+            break
+
+        else:
+            Print("Please Enter a valid input.")
 
 # -- Rest Of Game -- #
 
@@ -3685,11 +4420,14 @@ def start_prologue(settings):
         pass
     else:
         Print("\n-----Prologue-----")
-        Print("[Queen] You have been tasked with slaying the dragon that dwells in the Caves of Hulpha. This will not be an easy quest, as you must journey through the dense Forest, Frozen Peaks, Swamplands, and the village of Klare.\n[Queen] Good luck, my brave knight. My kingdom and I will await your safe return.\n")
-        Print("[Knight] I accept this quest, my queen. For your safety and for the honour of the kingdom, I shall see the beast slain. The Frozen Peaks, the Swamplands, and the villagers of Klare will not stop me. I will come back safely.\n")
-        Print("[Queen] Brave words, good knight, but strength alone will not defeat the dragon. You must use intelligence, patience, and follow your heart.\n[Queen] Go brave knight and may the gods be on your side ❤️")
+        Print("[Queen] You have been tasked with slaying the dragon that dwells in the Caves of Hulpha. This will not be an easy quest, as you must journey through the dense Forest, Frozen Peaks, and the devilish corrupted village that is Klare.\n[Queen] Good luck, my brave knight. My kingdom and I will await your safe return.\n")
+        time.sleep(1)
+        Print("[Knight] I accept this quest, my queen. For your safety and for the honour of the kingdom, I shall slay the beast. The Frozen Peaks and the gambling of Klare will not stop me. I will come back safely.\n")
+        time.sleep(1)
+        Print("[Queen] Brave words knight, but strength alone will not defeat the dragon. You must use intelligence, patience, and follow your heart.\n[Queen] Go brave knight and may the gods be on your side ❤️")
         settings['skip_intro'] = True
-        save_all('savedata.json', settings, game_stats)
+
+    save_global_data(settings, game_stats)
 
     return settings
 
@@ -3700,12 +4438,18 @@ def battle(player_data, game_stats):
     if player_data['location'] == 'Forest':
         current_enemy = enemy_data_forest()
         current_enemy['health'] += player_data['day']
+        if player_data['day'] >= 10:
+            current_enemy['strength'] += 1
     elif player_data['location'] == 'Frozen Peaks':
         current_enemy = enemy_data_frozen_peaks()
-        current_enemy['health'] -= 45 
-        current_enemy['health'] += int(3 * player_data['day'])
-    elif player_data['location'] == 'Swamplands':
-        current_enemy = enemy_data_swamplands()
+        # Scale HP
+        current_enemy['health'] = max(1, current_enemy['health'] - 45 + int(3 * player_data['day']))
+        # Scale damage
+        scaling = max(0.5, player_data['day'] / 15)  
+        current_enemy['strength'] = int(current_enemy['strength'] * scaling)
+
+    elif player_data['location'] == 'Village of Klare':
+        current_enemy = klare_villager_data()
     else:
         Print("Unknown location!")
         return
@@ -3782,9 +4526,6 @@ def battle(player_data, game_stats):
                 # Increase stat of enemies killed by 1
                 game_stats['enemies_killed'] += 1
 
-                # Increase stat of battles won by 1
-                game_stats['battles_won'] += 1
-
                 break
             
             # Enemy Attacks
@@ -3798,7 +4539,8 @@ def battle(player_data, game_stats):
                         game_stats['times_dodged'] += 1
                 else:
                     player_data['health'] -= enemy_damage
-                    check_death(player_data, game_stats)
+                    if check_death(player_data, game_stats, current_enemy['name']):
+                        return
 
     else:
 
@@ -3832,11 +4574,11 @@ def battle(player_data, game_stats):
             if current_enemy['health'] <= 0:
                 current_enemy['health'] = 0
 
-            Print(f"\n[Knight] You attacked the {current_enemy['name']} and dealt {player_damage} damage! Health remaining: {current_enemy['health']}")
+            Print(f"\n[Knight] You attack the {current_enemy['name']} and deal {player_damage} damage! Health remaining: {current_enemy['health']}")
             if lifesteal_value > 0:
                 drained = int(player_damage * (lifesteal_value / 100))
                 player_data['health'] += drained
-                Print(f"You gained {drained} health!")
+                Print(f"You gained {drained} health!\n")
               
             if companion_damage == 0:
                 pass
@@ -3877,12 +4619,14 @@ def battle(player_data, game_stats):
                     # Increase game stat of times dodged by 1
                     game_stats['times_dodged'] += 1
                 else:
-                    Print(f"[Enemy] The {current_enemy['name']} did {enemy_damage} damage! Health remaining: {player_data['health']}")
-                    check_death(player_data, game_stats)
+                    Print(f"[Enemy] The {current_enemy['name']} does {enemy_damage} damage! Health remaining: {player_data['health']}")
+                    if check_death(player_data, game_stats, current_enemy['name']):
+                        return
                     
             else:
-                Print(f"[Enemy] The {current_enemy['name']} did {enemy_damage} damage! Health remaining: {player_data['health']}")
-                check_death(player_data, game_stats)
+                Print(f"[Enemy] The {current_enemy['name']} does {enemy_damage} damage! Health remaining: {player_data['health']}")
+                if check_death(player_data, game_stats, current_enemy['name']):
+                    return
             
             time.sleep(1.4) # Delay Between attacks
             
@@ -3890,9 +4634,6 @@ def battle(player_data, game_stats):
 
             # Increase stat of enemies killed by 1
             game_stats['enemies_killed'] += 1
-
-            # Increase stat of battles won by 1
-            game_stats['battles_won'] += 1
 
             # Play win message
             win_message = random.randint(1, 3)
@@ -3904,30 +4645,66 @@ def battle(player_data, game_stats):
                 Print("\n[Knight] One enemy less between me and the dragon!")
 
 # Main game loop
-def start_story(player_data, settings, game_stats):
+def start_story(player_data, settings, game_stats, klare_data):
     
-    global healed_today, fight_boss
+    global healed_today, fight_boss, killed_baron, lost_to_baron
     
-    if settings['debugging'] == False:
+    if player_data['debugging'] == False:
         Print("\n-----Main Game-----")
-        Print("You leave the castle and head out to the forest and setup a camp")
+        if player_data['day'] == 0:
+            Print("You leave the castle and head out to the forest and setup a camp")
         time.sleep(2)
     else:
         player_data['max_health'] = 1000
         player_data['health'] = 1000
         player_data['gold'] = 100000
-        
+        player_data['health_potions'] = 999
+        player_data['slime_kingdom'] = True
+
+        owned_weapon_names = set(player_data['owned_weapons'])
+        owned_armour_names = set(player_data['owned_armour'])
+
+        added_weapons = []
+        added_armour = []
+
+        # Add missing weapon names
+        for w in weapons():
+            if w['name'] not in owned_weapon_names:
+                player_data['owned_weapons'].append(w['name'])
+                added_weapons.append(w['name'])
+
+        # Add missing armour names
+        for a in armour():
+            if a['name'] not in owned_armour_names:
+                player_data['owned_armour'].append(a['name'])
+                added_armour.append(a['name'])
+            
     # Increase stat of games played by 1
-    game_stats['games_played'] += 1
+    game_stats['games_opened'] += 1
 
     while True:
         
-        # Save stats to JSON file after exploring
-        save_all('savedata.json', settings, game_stats)
+        save_global_data(settings, game_stats)
+        save_slot(current_slot, player_data, klare_data, weapons_data, armour_data, world_state)
 
         # Makes sure player health isnt above max health
         if player_data['health'] > player_data['max_health']:
             player_data['health'] = player_data['max_health']
+
+        # Makes sure crit chance isnt above 100
+        if player_data['crit_chance'] > 100:
+            player_data['crit_chance'] = 100
+            equipped_weapon = None
+            for w in weapons_data:
+                if w["name"] == player_data["weapon_equipped"]:
+                    equipped_weapon = w
+                    break
+            equipped_weapon['crit_chance'] = 100
+
+        
+        # Starts the dragon fight on day 45
+        if player_data['day'] == 45:
+            break
             
         #Stops CMD from cleaning via stat_display before the text is finished being read    
         input("\nPress Enter to continue: ")
@@ -3941,8 +4718,8 @@ def start_story(player_data, settings, game_stats):
         
         if player_data['slime_kingdom']:
             print("👑 [8] Slime Kindom")
-        if settings['debugging']:
-            print("[10] Debugging")
+        if player_data['debugging']:
+            print("🐒 [10] Debugging")
         action = input("Enter: ")
         
         if action == '1':
@@ -3955,21 +4732,34 @@ def start_story(player_data, settings, game_stats):
             elif player_data['location'] == 'Frozen Peaks':
                 explore_frozen_peaks(player_data, weapons_data, game_stats)
                 
-            # If the player is in the swamplands
-            elif player_data['location'] == 'Swamplands':
-                explore_swamplands(player_data)
+            # If the player is in Klare
+            elif player_data['location'] == 'Village of Klare':
+                explore_klare(player_data, weapons_data, armour_data, klare_data)
                 
             healed_today = False
                 
         elif action == '2':
             if healed_today == False:
-                player_data['max_health'] += 5
-                player_data['health'] = min(player_data['max_health'], player_data['health'] + 30)
-                Print("\n[Knight] I shall sit down to regain my strength (+30 Health, +5 Max Health)")
-                healed_today = True
+                if player_data['location'] == "Forest":
+                    player_data['max_health'] += 5
+                    player_data['health'] = min(player_data['max_health'], player_data['health'] + 30)
+                    Print("\n[Knight] I shall sit down to regain my strength (+30 Health, +5 Max Health)")
+                    healed_today = True
 
-                # increase stat of times rested by 1
-                game_stats['times_rested'] += 1
+                    # increase stat of times rested by 1
+                    game_stats['times_rested'] += 1
+                
+                elif player_data['location'] == "Frozen Peaks":
+                    player_data['max_health'] += 5
+                    player_data['health'] = min(player_data['max_health'], player_data['health'] + 40)
+                    Print("\n[Knight] I shall sit down to regain my strength (+40 Health, +5 Max Health)")
+                    healed_today = True
+
+                    # increase stat of times rested by 1
+                    game_stats['times_rested'] += 1
+
+                else:
+                    Print("\nYou can't rest in Klare")
 
             else:
                 Print("\n[Knight] I have too much energy to sit down right now")
@@ -4028,174 +4818,43 @@ def start_story(player_data, settings, game_stats):
                     Print("\nPlease Enter a valid input")
                 
         elif action == '6':
-            # Update log
-            os.system('cls') # Clear CMD
-            Print("-----Current Version: 4.3-----")
-            print("-Added lifetime game stats to the settings menu (which save by the way)")
-            print("-Added three new weapons, two bows, the 'Compound Bow' and 'Elven Bow' and a new spear, the 'Wooden Spear'")
-            print("-Added the 'Elven Bow' to the Kind Elf event in the Forest and the other two to the merchants")
-            print("-Added the some small enemy scaling to the Forest enemies")
-            print("-Added some colours to the headings of events")
-            print("-Updated the 21 Minigame to add 'Easy' 'Medium' and 'Hard' difficulties")
-            print("-Combined health and max health into one line in your stats")
-            print("\n---Bugs/Changes---")
-            print("-HOPEFULLY I've fixed ALL the speeling errors and stuff 🤞")
-            print("-Buffed the Kind Elf to give +50 Max Health instead of +30")
-            print("-Buffed Snow Wanderer's health crystal")
-            print("-Lowered Snow Wanderer's prices to be more affordable")
-            print("-Changed resting to increase your max health before your health (I was getting ragebaited by it)")
-            print("-Changed the Goblin Tinker's damage upgrade price to a uniform 350 gold but only +2 damage for a Frost Sword instead of +4")
-            print("-Changed [Bounty Hunter] to be called [Bounty Hunters]")
-            print("-Changed the first line when getting the hidden shrine event to make more sense when getting the moss well")
-            print("-Fixed having to press enter twice at the end of exploration when having 'Press Enter to Continue' enabled")
-            print("-Fixed enemy health still going into the negatives from companion attacks")
-            print("-Fixed the Forest merchant not appearing on day 5 and 11 in some cases")
-            print("-Fixed Frozen Peaks enemy scaling not calculating properly and buffed it")
-            print("-Fixed the Hunting bow and Eagle Spear not being able to be bought")
-            print("-Fixed needing to press 1 instead of enter to buy armour from the Snow Wanderer")
-            print("-Fixed Forest merchant Cloth Armour still saying it costs 300 gold despite being 225")
-            print("-Fixed the storm power not working properly")
-            print("-Fixed not being able to die to being bitten by a snake")
-            print("\n-----Previous Version: 4.2-----")
-            print("-The merchant now always appears on day 5 and 11 in the Forest area")
-            print("-The merchant now always appears on day 13 and 19 in the Frozen Peaks area")
-            print("-Removed the memory game until V5 as I couldn't get it working to the level I want")
-            print("-Added a confirmation to sharpening your sword in the blacksmith")
-            print("\n---Bugs/Changes---")
-            print("-Added the V2 update log back")
-            print("-Added a little bit of enemy scaling in the frozen peaks")
-            print("-Added a new tip and fact")
-            print("-Added a 1 second delay after 'I hope they aren't nearby' in the forest cave event. So cool right??")
-            print("-Added the cost of sharpening your sword next to the option")
-            print("-Buffed Lifesteal 3 from 20% to 25% lifesteal")
-            print("-Nerfed the health and strength of the forest 'hard' enemies slightly")
-            print("-Lowered cloth armour price from 300 to 225 gold")
-            print("-Changed the elder yeti event so now you get 3 enchant rolls instead of 1 enchant and 10 weapon damage")
-            print("-Changed the animal attack line to be 1 line lower")
-            print("-Changed the shrine merchant intro line to be 1 line lower too")
-            print("-Changed the bandit outpost difficulty to 'VERY HARD' instead of 'VERY DIFFICULT'")
-            print("-Fixed the lost villager event from skipping if entering an incorrect option")
-            print("-Fixed not being able to buy armour from the Frozen Peaks blacksmith and merchant (band aid fix)")
-            print("-Fixed frozen peaks hermit second to last line")
-            print("-Fixed a missing [name here] in both the blacksmiths")
-            print("-Fixed both blacksmiths not being able to upgrade armour🤦")
-            print("-Fixed the map in the forest endless road")
-            print("-Fixed caterpillar princess armour plate reward spelling error")
-            print("-Fixed drinking a health potion confirmation not showing while exploring")
-            print("-Fixed not being able to afford an enchant book not saying you cant afford it")
-            print("-Fixed the Snow Wanderer enchant book not having a number")
-            print("-Fixed Snow Wanderer being called Merchant when buying a potion")
-            print("\n-----Previous Version: 4.1-----")
-            print("-Enchants now work and can be found in more places")
-            print("-Made Enchants buyable from merchants")
-            print("-Health potions now store in your inventory and will be used to save you from death")
-            print("-Added 2 new events to the Frozen Peaks")
-            print("\n---Bugs/Changes---")
-            print("-Buffed the Enchants to be more useful")
-            print("-Removed 'Check Stats' and made it stay at the top")
-            print("-Removed Recommended stats from help menu and added them to the boss fight menu")
-            print("-Removed the owned weapons and armour from the stat display")
-            print("-Changed the 'Critical Hit!' To be in the center of the attacks not at the top")
-            print("-Changed the inventory to be easier to navigate")
-            print("-Changed the possible rewards from Frozen Peaks crystal cave event from 5+ or -5 to +7 or -7")
-            print("-Changed some events in Frozen Peaks have a higher chance to give health")
-            print("-Changed slime kingdom exit from '3' to 'r'")
-            print("-Changed the frozen peaks 'storm power' to be set to 0 when escaping the endless storm event")
-            print("-Changed the 'Knight RPG' intro")
-            print("-Changed the rewards of a potion in the Forest cave event")
-            print("-Changed when fighting a boss it will now show your recommended defence alongside health and damage")
-            print("-Changed the skip intro setting to be set to true after viewing the intro for the first time")
-            print("-Changed so if the enemy is already dead, your companions won't attack")
-            print("-Changed the game to load wayy faster")
-            print("-Changed the Frozen Peaks merchant to be more common")
-            print("-Fixed the enemy and player health going into the negatives")
-            print("-Fixed blacksmiths being able to upgrade 'No Armour'")
-            print("-Fixed viewing the endless storm map crashing the game")
-            print("-Fixed a bug where the potion reward from the Old Lady wouldn't work")
-            print("-Fixed not being able to buy armour from the Goblin Tinkerer")
-            print("-Fixed health potions not working in Frozen Peaks")
-            print("-Fixed not fighting the correct enemy in the cave")
-            print("-Fixed auto exiting the blacksmith when buying extra damage")
-            print("-Fixed robbing the villager saying +3 defence instead of +2 defence")
-            print("-Fixed only being able to upgrade armour once in the entire game")
-            print("-Fixed multiple incorrect formattings")
-            print("-Fixed the Frozen Peaks wizard event from not working")
-            print("\n-----Previous Version: V4-----")
-            print("-ADDED THE FROZEN PEAKS!!! with about 20 new events, along with the frozen merchant")
-            print("-ADDED WORKING and swapable armour from the merchants!!!")
-            print("-Added the SLIME KINGDOM!!!")
-            print("-Changed defence rewards to be mostly applied to the current armour instead of the player")
-            print("-Added a setting to skip the opening dialogue upon opening the game")
-            print("-Added tips above the main menu")
-            print("-Your settings now save")
-            print("-Reworked meeting Bob and the bounty hunters")
-            print("-Reworked the endless road to be easier to escape")
-            print("-Added more outcomes to the shrine (along with 2 super rare ones :O)")
-            print("-Added a press Enter to continue setting")
-            print("-Reworked the help menu to include new features and make it easier to understand")
-            print("-The terminal now clears to make it easier to see whats happening")
-            print("-Added an intro")
-            print("-Nerfed the Elf rewards massively")
-            print("-Removed Debug mode from settings")
-            print("-The player now starts on day 1 instead of 0")
-            print("-Removed strength from the berry event and decreased the odds of the berry being positive")
-            print("-New Trap in the forest area")
-            print("-Made the falling log trap weaker")
-            print("-Tweaked flower event rewards")
-            print("-Updated Rock Paper Scissors")
-            print("-Updated 21 Game")
-            print("-Renamed Coins to Gold in check stats")
-            print("\n---Bugs---")
-            print("-Fixed game crash when exploring haunted house")
-            print("-Fixed one of the haunted house events not finishing")
-            print("-Fixed multiple instances of the game not registering an invalid input")
-            print("-Fixed Frost Orb from bandit outpost showing rewards incorrectly")
-            print("-Fixed the map in the endless road not letting you escape")
-            print("-Fixed variables not fully resetting when restarting the game")
-            print("-Fixed an issue where the merchant would say you cant afford something after you buy it")
-            print("-Fixed multiple instances of the game breaking when entering an invalid number")
-            print("-Fixed an event that caused you to fight the same enemy over and over")
-            print("-Fixed game not ending if player presses anything other than 1 when dead")
-            print("-Fixed the berry event from never running out of berries")
-            print("-Fixed the gotten lost event to not end when going left")
-            print("-Fixed some spelling issues")
-            print("\n-----Previous Version: V3.1-----")
-            print("-Added a game of Rock Paper Scissors")
-            print("\n-----Previous Version: V3-----")
-            print("- Added the Frozen Peaks and Swamplands area")
-            print("- Added a Forest, Frozen Peaks and Swamplands boss")
-            print("- Added functionality to defence")
-            print("- Added critical hits")
-            print('- Added around 20 new events and removed the " You found nothing " (mostly) (for the forest area)')
-            print("- Added a game of 21 that you can vs a villagers in for gold (easily accessible in debug menu)")
-            print("- Added a simple game of higher or lower to bet gold on (easily accessible in debug menu)")
-            print("- Added Enchants... without the effects!!")
-            print("\n-----Previous Version: V2-----")
-            print("- Added a debugging menu")
-            print("- Added a help menu")
-            print("- Remove Levels")
-            print("- Added wayyy more Forest enemies")
-            print("- Balance changes")
-            print("- More dialogue")
-            print("- Changed starting prologue")
-            print("- Added some more dividers between parts of the game")
-            print("\n-------------------------------------------------------------------------")
+            updatelog()
             
         elif action == '7':
             
             os.system('cls') # Clear CMD
 
-            true_damage = get_equipped_weapon_damage(player_data, weapons_data) + player_data['strength']
-            Print(f"Your Health: {player_data['health']}, Your Damage: {true_damage}, Your Defence: {player_data['defence']}")
-            Print("\nHowler Recommended: 150 Health, 35 Damage, 10 Defence")
-            Print("Bigfoot Recommended: 500 Health, 80 Damage, 25 Defence")
-            Print("Headwitch Recommended: 1200 Health, 180 Damage, 40 Defence")
-            Print("Baron Recommended: 2500 Health, 250 Damage, 70 Defence")
+            # find the average damage of the player with enchants and crits
+            weapon = get_weapon_by_name(player_data['weapon_equipped'])
+            base_damage = get_equipped_weapon_damage(player_data, weapons_data)
+            dmg_bonus, crit_bonus = get_enchant_bonus(weapon)
+            # Apply enchant damage multiplier
+            enchanted_damage = base_damage + int(base_damage * dmg_bonus)
+            # Apply strength
+            enchanted_damage += player_data['strength']
+            # Total crit chance including Precision enchants
+            total_crit = weapon['crit_chance'] + crit_bonus
+            # Average damage over time factoring crits
+            avg_damage = enchanted_damage * (1 + (total_crit / 100))
+            Print(
+                f"Your Health: {player_data['health']}, "
+                f"Your Damage: {int(avg_damage)} (avg with crits and enchants), "
+                f"Your Defence: {player_data['defence']}"
+            )
+
+            Print("\nHowler Recommended: 150 Health, 35 Damage, 10 Defence (Forest)")
+            Print("Bigfoot Recommended: 500 Health, 80 Damage, 25 Defence (Frozen Peaks)")
+            Print("Baron Recommended: 800 Health, 150 Damage, 40 Defence (Klare)")
             Print("Dragon Recommended: ???")
 
-            action = input("\nAre you sure you want to fight the boss?\n\n[1] Yes\n[2] No\nEnter: ")
+            if player_data['location'] == "Village of Klare":
+                Print("\n**Note that you do not need to kill the Baron to fight the dragon**")
+                action = input("\nAre you sure you want to fight a boss?\n\n[1] Baron\n[2] Dragon\n[3] No\nEnter: ")
+            else:
+                action = input("\nAre you sure you want to fight the boss?\n\n[1] Yes\n[2] No\nEnter: ")
+
             if action == '1':
-                if player_data['location'] == 'Forest':
+                if player_data['location'] == 'Forest': # Fight Howler
                     fight_boss = True
                     battle(player_data, game_stats)
                     fight_boss = False
@@ -4204,27 +4863,76 @@ def start_story(player_data, settings, game_stats):
                     healed_today = False
                     time.sleep(3)
                     os.system('cls')
-                    Print("As you go to leave towards the Frozen Peaks you take a look back at the Howler's body and feel proud.")
+                    Print("As you go to leave towards the Frozen Peaks you take a look back at the Howler's body and feel proud\n\nYou heal to full health")
+                    player_data['health'] = player_data['max_health']
                     Print("\n------ FROZEN PEAKS ------")
 
-                elif player_data['location'] == 'Frozen Peaks':
+                elif player_data['location'] == 'Frozen Peaks': # Fight Bigfoot
                     fight_boss = True
                     battle(player_data, game_stats)
                     fight_boss = False
                     game_stats['bosses_killed'] += 1
-                    player_data['location'] = 'Swamplands'
+                    player_data['location'] = 'Village of Klare'
+                    player_data['slime_kingdom'] = False
+                    player_data['companions'] = 0
+                    
                     healed_today = False
                     os.system('cls')
-                    Print("As you leave the storm of Frozen Peaks you look at Bigfoot's body and feel a sense of accomplishment")
-                    break
+                    Print("As you leave the storm of the Frozen Peaks you look at Bigfoot's body and feel a sense of accomplishment")
+                    if player_data['day'] < 30:
 
-                elif player_data['location'] == "Swamplands":
+                        Print("\nYou wander into Klare and are immedietly caught by a guard and taken to a hotel")
+                        time.sleep(1.5)
+                        Print("\n[Guard] The town is current on lockdown due to recent events, you will have to stay here for a while")
+                        time.sleep(1)
+                        Print("\n[Knight] What happend??")
+                        time.sleep(1.5)
+                        Print("\n[Guard] Accomodation is on us, but you will have to stay here until further notice, Goodbye")
+                        time.sleep(1)
+                        Print("\nYou stay in the hotel, eating and resting until the lockdown is lifted")
+
+                        days_passed = 30 - player_data['day']
+                        player_data['day'] = 30
+                        player_data['health'] = player_data['max_health']
+
+                        print(f"\n{days_passed} days later...")
+                        time.sleep(1)
+                        Print("\n--ANNOUNCEMENT--\n[Unknown] The lockdown has been lifted, I want everybody back to work.")
+
+                    Print("\n------ VILLAGE OF KLARE -----")
+
+                elif player_data['location'] == 'Village of Klare' and killed_baron == False: # Fight baron
                     fight_boss = True
+                    Print("\n[Knight] Baron, for too long have you ruled this village unfairly.")
+                    Print("[Knight] All you do is take take take, and today I'm taking your life. 1v1 me lil bro")
+                    Print("\n[Baron] Hahaha, you cannot defeat me knight, not even close.")
                     battle(player_data, game_stats)
+                    if lost_to_baron == False:
+                        Print("\n[Baron] How did a... a weak, old, fat, pathetic, broke, useless, miserable fool of a knight defeat ME?")
+                        Print("\n[Knight] Nobody asked nerd.")
+                        game_stats['bosses_killed'] += 1
+                        killed_baron = True
+                    else:
+                        Print("\n\n[Baron] Haha, not even close knight, best you keep gambling and earning me money instead.")
+
                     fight_boss = False
-                    game_stats['bosses_killed'] += 1
-                    player_data['location'] = 'Klare'
-                    healed_today = False
+                
+                else:
+                    Print("\nHe's already dead bro, calm down.")
+            
+            elif action == '2' and player_data['location'] == "Village of Klare": # Fight dragon
+                os.system('cls')
+                Print("[Knight] I shall challenge the dragon...")
+                time.sleep(1)
+                if killed_baron == True:
+                    Print("\n[Literally the entire village] ...")
+                else:
+                    Print("\n[Literally the entire village and the baron] ...")
+                time.sleep(2)
+                Print("\n[Knight] FOR THE QUEEN AND THE KINGDOM!!!")
+                time.sleep(2)
+                break
+                
 
         elif action == '8':
             if player_data['slime_kingdom']:
@@ -4233,9 +4941,9 @@ def start_story(player_data, settings, game_stats):
         elif action == '10':
             
             # Debugging Menu
-            if settings['debugging'] == True:
+            if player_data['debugging'] == True:
                 print("\n---Debugging Menu---")
-                action = input("\n[1] Set Max Health\n[2] Set Health\n[3] Set Strength\n[4] Set Defence\n[5] Set Current Armour\n[6] Set Gold\n[7] Set Location\n[8] Set Current Weapon\n[9] Roll Weapon Enchant\nEnter: ")
+                action = input("\n[1] Set Max Health\n[2] Set Health\n[3] Set Strength\n[4] Set Defence\n[5] Set Current Armour\n[6] Set Gold\n[7] Set Location\n[8] Set Current Weapon\n[9] Roll Weapon Enchant\n[10] Set Current day\n[11] Set Crit chance\nEnter: ")
                 if action == '1':
                     player_data['max_health'] = int(input("Set Max Health: "))
                 elif action == '2':
@@ -4251,7 +4959,7 @@ def start_story(player_data, settings, game_stats):
                 elif action == '6':
                     player_data['gold'] = int(input("Set Gold: "))
                 elif action == '7':
-                    action = input("[1] Forest\n[2] Frozen Peaks\n[3] Swamplands\n[4] Village Of Klare\nEnter: ")
+                    action = input("[1] Forest\n[2] Frozen Peaks\n[3] Village Of Klare\nEnter: ")
                     if action == '1':
                         player_data['location'] = 'Forest'
                     elif action == '2':
@@ -4260,114 +4968,333 @@ def start_story(player_data, settings, game_stats):
                         player_data['health'] = 250
                         player_data['strength'] = 35
                         player_data['defence'] = 10
+                        player_data['day'] = 15
                     elif action == '3':
-                        player_data['location'] = 'Swamplands'
-                    elif action == '4':
-                        player_data['location'] = 'Klare'
+                        player_data['location'] = 'Village of Klare'
+                        player_data['gold'] = 300
                 elif action == '8':
                     new_weapon = input("Set Current Weapon: ")
                     player_data['weapon_equipped'] = new_weapon
                     player_data['owned_weapons'].append(new_weapon)
                 elif action == '9':
                     random_enchant(player_data, weapons_data)
+                elif action == '10':
+                    player_data['day'] = int(input("Set Current Day: "))
+                elif action == '11':
+                    player_data['crit_chance'] = int(input("Set Crit Chance: "))
 
         elif action == 'debug enable':
-            settings['debugging'] = True
-            save_all('savedata.json', settings, game_stats)
+            player_data['debugging'] = True
 
         elif action == 'debug disable':
-            settings['debugging'] = False
-            save_all('savedata.json', settings, game_stats)
+            player_data['debugging'] = False
 
         else:
             print("That is not a valid input")
+        
+        save_global_data(settings, game_stats)
 
-# Ending dialog      
-def start_ending():
-    Print("\nCongratulations on surviving the Frozen Peaks, unfortunately this is the current end of the game ;-;")
-    time.sleep(2)
-    Print("I hope you enjoyed the game and I will be adding more content in the future, thanks for playing!!")
-    return
+# Display different dragon based on health
+def display_dragon_health(current_enemy):
+    if current_enemy['health'] >= 1000:
+        print(r"####### ################ #######")
+        print(r"######   ##############   ######")
+        print(r"#####                      #####")
+        print(r"###     \              /     ###")
+        print(r"###      \            /      ###")
+        print(r"###       /\        /\       ###")
+        print(r"###      |  |      |  |      ###")
+        print(r"####      \/   | |  \/      ####")
+        print(r"#####                      #####")
+        print(r"#####                      #####")
+        print(r"######   \/\/\/\/\/\/\/   ######")
+        print(r"########                ########")
+        print(r"##########            ##########")
+        print(r"################################")
+    
+    elif current_enemy['health'] >= 750:
+        print(r"####### ################ #######")
+        print(r"######   ##############   ######")
+        print(r"#####                      #####")
+        print(r"###     \              /     ###")
+        print(r"###      \            /      ###")
+        print(r"###       /\        /\       ###")
+        print(r"###      |  |      |  |      ###")
+        print(r"####      \/   | |  \/      ####")
+        print(r"#####                 ##   #####")
+        print(r"#####                 ##   #####")
+        print(r"######   \/\/\/\/\  \/\/  ######")
+        print(r"########                ########")
+        print(r"##########            ##########")
+        print(r"################################")
+
+    elif current_enemy['health'] >= 500:
+        print(r"####### ################ #######")
+        print(r"######   ##############   ######")
+        print(r"#####                      #####")
+        print(r"###     \              /     ###")
+        print(r"###      \            /      ###")
+        print(r"###       /\                 ###")
+        print(r"###      |  |      ====      ###")
+        print(r"####      \/   | |          ####")
+        print(r"#####                 ##   #####")
+        print(r"#####                 ##   #####")
+        print(r"######   \/\/\/\/\  \/\/  ######")
+        print(r"########                ########")
+        print(r"##########            ##########")
+        print(r"################################")
+
+    elif current_enemy['health'] >= 250:
+        print(r"####### ################ #######")
+        print(r"######   ##############   ######")
+        print(r"#####                      #####")
+        print(r"###     \     ##       /     ###")
+        print(r"###           ##      /      ###")
+        print(r"###       /\                 ###")
+        print(r"###      |  |      ====      ###")
+        print(r"####      \/   |\           ####")
+        print(r"#####   ##              ## #####")
+        print(r"#####   ##              ## #####")
+        print(r"######   \/   /\/\  \/\/  ######")
+        print(r"########                ########")
+        print(r"##########            ##########")
+        print(r"################################")
+
+# Ending fight
+def start_ending(player_data, game_stats):
+
+    current_enemy = {"name": "Dragon", "health": 1500, "strength": 190, "gold": 10000}
+
+    Print(f"\n{RED}-----FINAL BATTLE-----{RESET}")
+    Print(f"You walk up to the enterance of the Dragon's Lair and draw your weapon.")
+
+    # Clamp player HP to max
+    player_data['health'] = min(player_data['health'], player_data['max_health'])
+
+    # Get equipped weapon data
+    equipped_weapon = next((w for w in weapons_data if w['name'] == player_data['weapon_equipped']), None)
+    if not equipped_weapon:
+        Print("Error: Equipped weapon not found!")
+        return
+
+    # Base player damage
+    true_damage = equipped_weapon['damage'] + player_data['strength']
+
+    # Enchant / Crit / Lifesteal data
+    crit_bonus = 0
+    lifesteal_value = 0
+
+    if equipped_weapon['special'] != "None":
+        enchant = equipped_weapon['special']
+
+        if enchant.startswith("Strength"):
+            strength_level = int(enchant.split()[1])
+            strength_multiplier = {1: 0.35, 2: 0.75, 3: 1.50}[strength_level]
+            true_damage += int(true_damage * strength_multiplier)
+
+        elif enchant.startswith("Precision"):
+            crit_bonus += int(enchant.split()[1]) * 25
+
+        elif enchant.startswith("Life Steal"):
+            lifesteal_value = {1: 10, 2: 15, 3: 20}[int(enchant.split()[2])]
+
+    # Dragon damage
+    base_enemy_damage = max(0, current_enemy['strength'] - player_data['defence'])
+
+    # ========= DRAGON BATTLE LOOP =========
+    while player_data['health'] > 0 and current_enemy['health'] > 0:
+
+        display_dragon_health(current_enemy)
+
+        # ---- Player attacks ----
+        player_damage = random.randint(max(1, true_damage - 5), true_damage + 7)
+
+        # Critical hit
+        crit_roll = random.randint(1, 100)
+        if crit_roll <= player_data['crit_chance'] + crit_bonus:
+            Print("\nCritical Hit!")
+            player_damage *= 2
+            game_stats['critical_hits'] += 1
+
+        # Track damage dealt
+        game_stats['total_damage_dealt'] += player_damage
+
+        # Apply damage to dragon
+        current_enemy['health'] -= player_damage
+        if current_enemy['health'] < 0:
+            current_enemy['health'] = 0
+
+        Print(f"\n[Knight] You attack the Dragon for {player_damage} damage! Dragon HP: {current_enemy['health']}")
+
+        # Lifesteal
+        if lifesteal_value > 0:
+            drained = int(player_damage * (lifesteal_value / 100))
+            player_data['health'] += drained
+            Print(f"You gained {drained} health!\n")
+
+        # Dragon defeated
+        if current_enemy['health'] <= 0:
+            Print("\nTHE DRAGON FALLS!")
+            player_data['gold'] += 10000
+            Print(f"\nYou gain 10000 gold!")
+            break
+
+        # ---- Dragon attacks ---- #
+        enemy_damage = random.randint(max(0, base_enemy_damage - 5), max(0, base_enemy_damage + 7))
+
+        # Dodge if bow equipped
+        if "Bow" in player_data['weapon_equipped']:
+            dodge_roll = random.randint(1, 100)
+            if dodge_roll <= 30:
+                Print("[Dragon] You dodged the attack!")
+                game_stats['times_dodged'] += 1
+                time.sleep(2)
+                continue
+
+        # Apply dragon damage
+        player_data['health'] -= enemy_damage
+        if player_data['health'] < 0:
+            player_data['health'] = 0
+
+        Print(f"[Dragon] The dragon hits you for {enemy_damage} damage! Health remaining: {player_data['health']}")
+
+        check_death(player_data, game_stats)
+
+        time.sleep(2)
+
+    # ---- Victory ---- #
+    if player_data['health'] > 0:
+        game_stats['enemies_killed'] += 1
+        game_stats['bosses_killed'] += 1
+        player_data['dragon_defeated'] = True
+        player_data['owned_weapons'].append("Dragon Sword")
+        player_data['owned_armour'].append("Dragon Armour")
+
+        Print("\n[Knight] At last... the kingdom is safe")
+
+        time.sleep(2)
+        Print("\nYou travel back to the castle, and the people watch you as you make your way into the throne room.")
+        
+        time.sleep(3)
+        Print("\n[Knight] Queen... the dragon is dead.")
+
+        time.sleep(3)
+        Print("\n[Queen] Well done knight, you have done what only one person ever could, and what many said was impossible.")
+        Print("[Queen] The dragon of Hulpha is no more, and the road through the Forest, Frozen Peaks, and Klare is safe once again.")
+        time.sleep(2)
+
+        Print("\n[Knight] I thank you, my queen. There were many dangers, but the thought of this kingdom kept me going")
+        time.sleep(2)
+
+        Print("\n[Queen] You faced more than danger knight.")
+        Print("[Queen] You faced the entire world and everything it threw at you.")
+        time.sleep(2)
+
+        Print("\n[Knight] Every battle was worth it, knowing it will help our people sleep in peace.")
+        time.sleep(3)
+
+        Print("\n[Queen] The kingdom owes you a debt that cannot be repaid in gold or praise alone.")
+        Print("[Queen] You will forever be remembered as the Knight of Hulpha, the one who ended the dragon’s reign.")
+        time.sleep(3)
+
+        Print("\n[Knight] Thank you, Queen. But I ask for no legacy or no legend. I just ask that the kingdom be built without fear.")
+        time.sleep(2)
+
+        Print("\n[Queen] And so it shall. Rest now, knight.\n[Queen] Your quest is complete 💖.")
+
+        input("\n\nAnd good work player, I hope you enjoyed the game and thank you so much for playing c:\n\nPress Enter to exit: ")
 
 # Checks if the player has died
-def check_death(player_data, game_stats):
+def check_death(player_data, game_stats, enemy_name=None):
     if player_data['health'] <= 0:
+
+        # SPECIAL DEATH OVERRIDE
+        if enemy_name == "Baron":
+            global lost_to_baron
+
+            player_data['health'] = player_data['max_health']
+            player_data['gold'] = 50
+            lost_to_baron = True
+            return True
+
         if player_data['health_potions'] > 0:
             player_data['health_potions'] -= 1
             Print("\nYou used a health potion to save yourself from dying!\n+10 Health")
             player_data['health'] = 10
-
-            # increase game stat of health potions used by 1
             game_stats['health_potions_used'] += 1
+            return False
 
         else:
-            
-            # Increase game stat of battles lost by 1
             game_stats['battles_lost'] += 1
-
             game_over()
-    else:
-        pass
+
+    return False
 
 # If player dies
 def game_over():
 
     Print("\nYou have unfortunately died, failing to slay the dragon and save the kingdom")
+
+    reset_world_state(globals())
+
+    player_data = main_player()
+
+    world_state = get_world_state_from_globals(globals())
+
+    save_slot(current_slot, player_data, klare_data, weapons_data, armour_data, world_state)
+
     action = input("Press 1 to Play Again or press Enter to exit\nEnter: ")
     if action == '1':
-        global fight_boss, fight_caveman, fight_campfire_bandit, fight_bandit_outpost, fight_villager
-        global fight_ghost, fight_merchant, fight_black_knight, fight_endless_road_skeleton, fight_bandit_leader
-        global fight_elder_yeti, viewed_map, encounter_1, encounter_2, helped_bob, seen_bob, seen_bounty_hunter
-        global colours_left, healed_today, upgraded_armour, storm_power, picked_events_left
-        # Reset globals
-        fight_boss = False
-        fight_caveman = False
-        fight_campfire_bandit = False
-        fight_bandit_outpost = False
-        fight_ghost = False
-        fight_merchant = False
-        fight_black_knight = False
-        fight_endless_road_skeleton = False
-        fight_bandit_leader = False
-        fight_elder_yeti = False
-        viewed_map = False
-        encounter_1 = True
-        encounter_2 = False
-        helped_bob = False
-        seen_bob = False
-        seen_bounty_hunter = False
-        colours_left = 8
-        healed_today = True
-        upgraded_armour = False
-        fight_villager = False
-        storm_power = 0
-        picked_events_left = 0
         os.system('cls')
         start_game()
         
     else:
         sys.exit()
 
-start_game()
+try:
+    start_game()
 
-# todo
+except Exception:
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write("\n====================\n")
+        f.write(f"Crash Time: {datetime.now()}\n\n")
+        f.write(traceback.format_exc())
 
-# NOTHING!!!!
+    print("\nAn error occurred 😊")
+    print("Crash details were written to crash_log.txt.")
+    input("\nPress Enter to exit...")
 
-# V5 (PROB)
+# V6
 
-# CLIMB UP MOUNTAIN FOR ENCHANTED frost orb (kinda like endles road but you can quit)
-# MUCH MUCH polish on the frozen peaks area needed
+# make crit chance update correctly in merchants and make them equip swords when you buy them.
+
+# uknown bug where after some exploration events bronze sword stat comparison shows up and ends day early...?
+# I just viewed bronze sword stats in inventory before exploring
+
+# idea of showing enemy stats before battle and showing the enemy scaling on its stats like "You encounter a bandit (100 health | 10 strength +2 from enemy scaling)"
+
+# add a bug event in frozen peaks (1% chance) where you 1v1 a bug enemy and if you lose it crashes the game.
+
+# add arena to slime kingdom or even just for free where you can fight enemies for gold. (like 3 max each day) MAYBE tiers so its like a boss fight
+# where you can see the enemy HP and attack plus the gold reward.
+
+# Make slime kingdom event like 10% chance (or force it to happen atleast once) and move a forest event to the frozen peaks.
+
+# make changes to if you say youve seen bob to hunters without having seen him (like they have bob and he says you helped him or sum)
+
+# EXPAND THE TALL METAL CROSS to feel like a maze before enemy and reward
+
+# achievements
+
+# CLIMB UP MOUNTAIN FOR frost orb or even HIGHER FOR ENCHANTED frost orb. Basically make it gambling but you can quit and still win.
+# Possible idea for it is you start with 100 gold and can quit immedietly to claim 100 gold OR you can "climb" the mountain for multipliers and other rewards costing 10 gold per climb.
+# think like 30 stages to climb and you need just good RNG to reach the top kinda or can maybe sacrafise health for more gold?
+
 # fix frozen peakjs endless road reused stuff (lazy guy over here)
-# add a debug JSON file, which simply stores the last event you were on. Maybe prints out the error too, if thats possible.
-# rework bob and bounty hunters again ;-;
-# make merchant menu feel like a different menu (add colours basically)
-# rework each merchant so that theres a little menu for each item. Like damage, crit chance and dodge chance
-# add gold earned stat
-# full data saving with 3 save slots
-# Village of Klare 
-# achievements (survive 50 days, kill 100 enemies, etc)
-# Village of Klare is a gambling city where you can play games of chance and win gold or items (into the millions but stuff also costs millions) each villager (like 30 total) have a limited amount of money
+# update endless storm frozen peaks, try and not sound like a copy and paste
 
+# make a "Elite" difficulty above hard for each minigame where the enemy gets a hint like what ALL your cards are in 21
+# or 1 option you DIDNT pick in RPS.
+# or what 3 of the peoples dice are in liars dice instead of 2
 
-# just an idea but maybe make the chest rewards random and with tiers of rewards like clash royale lucky chest type stuff.
+# add a gambling game where its like the impossible quiz but 10 gold per attempt.
