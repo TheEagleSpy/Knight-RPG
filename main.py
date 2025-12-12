@@ -4678,7 +4678,7 @@ def start_story(player_data, settings, game_stats, klare_data):
             if a['name'] not in owned_armour_names:
                 player_data['owned_armour'].append(a['name'])
                 added_armour.append(a['name'])
-                
+            
     # Increase stat of games played by 1
     game_stats['games_opened'] += 1
 
@@ -4714,7 +4714,7 @@ def start_story(player_data, settings, game_stats, klare_data):
         print(f"\n{display_random_tip()}")
 
         print("\n-----Choices-----")
-        print("🗺️  [1] Explore\n🛏️  [2] Rest\n📦 [3] View Inventory\n⚙️  [4] Settings\n❓ [5] Help\n📝 [6] Update log\n👹 [7] Fight Zone Boss")
+        print("🗺️ [1] Explore\n🛏️ [2] Rest\n📦 [3] View Inventory\n⚙️ [4] Settings\n❓ [5] Help\n📝 [6] Update log\n👹 [7] Fight Zone Boss")
         
         if player_data['slime_kingdom']:
             print("👑 [8] Slime Kindom")
