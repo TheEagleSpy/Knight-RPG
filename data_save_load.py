@@ -133,7 +133,7 @@ def get_default_values():
     }
 
     default_stats = {
-        "games_played": 0,
+        "games_opened": 0,
         "bosses_killed": 0,
         "enemies_killed": 0,
         "gold_earned": 0,
