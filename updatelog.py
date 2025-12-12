@@ -3,7 +3,7 @@ import os
 # Update log
 def updatelog():
     os.system('cls') # Clear CMD
-    Print("-----Current Version: V5-----")
+    print("-----Current Version: V5-----")
     print("-FINSIHED ALL THE MAIN CONTENT OF THE GAME!!!!")
     print("-ADDED THE FINAL AREA, THE VILLAGE OF KLARE!")
     print("-ADDED A DRAGON BOSSFIGHT AT THE END OF THE GAME!!!")
