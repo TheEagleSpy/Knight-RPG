@@ -3855,7 +3855,7 @@ def explore_klare(player_data, weapons_data, armour_data, klare_data):
             print("-If one player exceeds the target score while the other remains below it, the player under the target wins automatically. If both players exceed the target, the winner is the one closest to it.")
             print("-The deck contains 13 cards numbered 1 through 13 with no duplicates, so if one card is in a player's hand it cannot appear in the opponent's hand.")
             print("\n---Higher or Lower---")
-            print("-Guess if the next number is going to be below the 'Current Number: ' or higher than it. Thats bout it ¯\_(ツ)_/¯")
+            print(r"-Guess if the next number is going to be below the 'Current Number: ' or higher than it. Thats bout it ¯\_(ツ)_/¯")
             print("\n---Liar's Dice---")
             print("-Enter bids as two numbers: quantity then face (e.g., 3 5). Meaning you claim there is atleast 3 dice with the face of 5 across all board")
             print("-You cannot lower a bid’s quantity or face value.")
@@ -4678,7 +4678,7 @@ def start_story(player_data, settings, game_stats, klare_data):
             if a['name'] not in owned_armour_names:
                 player_data['owned_armour'].append(a['name'])
                 added_armour.append(a['name'])
-            
+                
     # Increase stat of games played by 1
     game_stats['games_opened'] += 1
 
