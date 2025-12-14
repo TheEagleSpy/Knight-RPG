@@ -193,7 +193,7 @@ def assign_partners(players):
             for p in group:
                 partners[p].extend([x for x in group if x != p])
 
-    return partners, k, max_winners, split
+    return partners, max_winners, split
 
 def all_partner_dice(name, partners_map, active_players):
     dice = []
