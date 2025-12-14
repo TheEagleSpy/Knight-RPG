@@ -461,58 +461,60 @@ def new_game(slot_num):
 
 # Loads save and starts game
 def load_slot_and_apply(slot_num):
-    global current_slot, player_data, klare_data, world_state
+    global current_slot, player_data, klare_data, world_state, weapons_data, armour_data
     current_slot = slot_num
 
     data = load_slot(slot_num)
     if not data:
-        print("No save found in that slot.")
+        print("No save found or save file is corrupted.")
         return False
 
-    # --- Reassign loaded data to globals ---
     player_data = data["player_data"]
     klare_data = data["klare_data"]
-    weapons_data = data['weapons_data']
-    armour_data = data['armour_data']
+    weapons_data = data["weapons_data"]
+    armour_data = data["armour_data"]
     world_state = data["world_state"]
 
-    return True  # Breaks out of save menu and enters the game
+    apply_world_state_to_globals(world_state, globals())
+    return True
 
 # Loads debug save and starts game
 def load_debug_slot_and_apply():
-    global current_slot, player_data, klare_data, world_state
+    global current_slot, player_data, klare_data, world_state, weapons_data, armour_data
     current_slot = "debug"
 
     defaults = get_default_values()
     path = get_slot_path("debug")
 
-    # If file doesn't exist, create a fresh debug save
     if not os.path.exists(path):
         player_data = defaults["player_data"].copy()
         klare_data = defaults["klare_data"].copy()
-        weapons_data = defaults['weapons_data'].copy()
-        armour_data = defaults['armour_data'].copy()
+        weapons_data = defaults["weapons_data"].copy()
+        armour_data = defaults["armour_data"].copy()
         world_state = defaults["world_state"].copy()
 
-        # Enable debugging for this save
         player_data["debugging"] = True
-        player_data['slime_kingdom'] = True
+        player_data["slime_kingdom"] = True
+
         save_slot("debug", player_data, klare_data, weapons_data, armour_data, world_state)
         print("\nNew debug slot created.")
     else:
-        # Load and merge existing slot
         data = load_slot("debug")
+        if not data:
+            print("Debug save corrupted, recreating.")
+            return load_debug_slot_and_apply()
+
         player_data = data["player_data"]
         klare_data = data["klare_data"]
-        weapons_data = data['weapons_data']
-        armour_data = data['armour_data']
+        weapons_data = data["weapons_data"]
+        armour_data = data["armour_data"]
         world_state = data["world_state"]
-        player_data["debugging"] = True  # Always force it on when using debug slot
+        player_data["debugging"] = True
+
         print("\nLoaded existing debug slot.")
 
-    # Apply world state and go straight into the game
     apply_world_state_to_globals(world_state, globals())
-    return True  # Continue into gameplay
+    return True
 
 # Deletes selected save
 def delete_game(slot_num):
@@ -3778,6 +3780,7 @@ def klare_villager_data():
         {"name": "Oliver", "gold": 60, "difficulty": "Medium"},
         {"name": "Mia", "gold": 75, "difficulty": "Medium"},
         {"name": "Liam", "gold": 65, "difficulty": "Medium"},
+        {"name": "Ava", "gold": 80, "difficulty": "Medium"},
         {"name": "Sophia", "gold": 70, "difficulty": "Medium"},
         {"name": "Noah", "gold": 55, "difficulty": "Medium"},
         {"name": "Albert", "gold": 85, "difficulty": "Medium"},
@@ -3819,11 +3822,15 @@ def explore_klare(player_data, weapons_data, armour_data, klare_data):
     Print(random.choice(intro_dialogue))
     time.sleep(2)
 
+    klare_data['day_pass'] = False
+
+    banked_gold = player_data['gold']
+
     while current_hour < 17:
 
         print(f"\nCurrent Time: {current_hour}:{current_minute:02d}")
         print("\n----- Choices -----")
-        print("🗣️  [1] Talk to Villagers")
+        print("🗣️ [1] Talk to Villagers")
         print("💵 [2] Visit the Minigame Hall")
         print("🎪 [3] Go to the Town Merchant")
         print("❓ [4] How to play each minigame")
@@ -3864,11 +3871,17 @@ def explore_klare(player_data, weapons_data, armour_data, klare_data):
             print("-Eliminated players are permanently out, no respawns, no spare dice.")
 
         elif action == 'r':
-            tax = int(player_data['gold'] * 0.12)
-            player_data['gold'] -= tax
+            day_income = player_data['gold'] - banked_gold
 
-            Print(f"\n**The Baron takes his cut of your total gold. -{tax} Gold**")
-            Print("\nYou head home early and rest until the next morning")
+            time.sleep(2)
+            os.system('cls')
+            
+            if day_income > 0:
+                tax = int(day_income * 0.12)
+                player_data['gold'] -= tax
+                Print(f"**The Baron takes his cut of your earnings. -{tax} Gold**")
+            else:
+                Print("**You earned nothing today. The baron doesn't take any tax.**")
 
             player_data['day'] += 1
             return
@@ -3883,14 +3896,24 @@ def explore_klare(player_data, weapons_data, armour_data, klare_data):
         if current_hour >= 17:
             break
 
-    if current_hour >= 17:
-        tax = int(player_data['gold'] * 0.12)
-        player_data['gold'] -= tax
+        if current_hour >= 17:
 
-        Print(f"**The Baron takes his cut of your total gold. -{tax} Gold**")
-        Print(f"\nThe village bell rings, it’s {current_hour}:00 PM. You head home")
+            day_income = player_data['gold'] - banked_gold
 
-        player_data['day'] += 1
+            time.sleep(2)
+            os.system('cls')
+            
+            if day_income > 0:
+                tax = int(day_income * 0.12)
+                player_data['gold'] -= tax
+                Print(f"**The Baron takes his cut of your earnings. -{tax} Gold**")
+            else:
+                Print("**You earned nothing today. The baron doesn't take any tax.**")
+
+            Print(f"\nThe village bell rings, it’s {current_hour}:00 PM. You head home")
+            player_data['day'] += 1
+
+            time.sleep(2)
 
 # Function to play minigames against villagers
 def minigame_hall(player_data, klare_data):
@@ -3901,16 +3924,16 @@ def minigame_hall(player_data, klare_data):
 
         while True:
 
-            Print("\n[Guard] 60 gold to enter or 500 gold for a lifetime pass")
+            Print("\n[Guard] 35 gold to enter or 500 gold for a lifetime pass")
             Print("\n[1] Pay Entry Fee\n[2] Purchase a lifetime pass\n[r] Exit")
             action = input("Enter: ")
             
             if action == '1':
-                Print("\n[Knight] Yes, here is 60 gold")
-                if player_data['gold'] >= 60:
-                    Print("-60 Gold")
+                Print("\n[Knight] Yes, here is 35 gold")
+                if player_data['gold'] >= 35:
+                    Print("-35 Gold")
                     Print("\n[Guard] You may enter")
-                    player_data['gold'] -= 60
+                    player_data['gold'] -= 35
                     klare_data['day_pass'] = True
                     break
                 
@@ -3920,18 +3943,18 @@ def minigame_hall(player_data, klare_data):
             elif action == '2':
                 Print("\n[Knight] Can I get a lifetime pass?")
                 if klare_data['basic_pass'] == False:
-                    if player_data['gold'] >= 350:
-                        Print("-350 Gold")
+                    if player_data['gold'] >= 500:
+                        Print("-500 Gold")
                         Print("\n[Guard] Yeah sure, heres a lifetime pass man")
                         klare_data['basic_pass'] = True
                         klare_data['day_pass'] = True
-                        player_data['gold'] -= 350
+                        player_data['gold'] -= 500
                         break
 
                     else:
                         Print("\n[Guard] Thats not enough, best you get a single pass")
                 else:
-                    Print("[Guard] You already have one...? How did you get to this message??")
+                    Print("[Guard] You already have one...? I mean, if you want to buy another, go for it...")
 
             elif action == 'r':
                 Print("[Knight] Actually maybe not")
@@ -3963,7 +3986,7 @@ def minigame_hall(player_data, klare_data):
         print(f"🟨 [2] Medium {f'({RED}locked{RESET})' if not easy_unlocked else f'({GREEN}unlocked{RESET})'}")
 
         # Hard unlocks when all medium villagers beaten
-        medium_unlocked = len(klare_data['medium_beaten']) == 7
+        medium_unlocked = len(klare_data['medium_beaten']) == 8
         print(f"🟥 [3] Hard {f'({RED}locked{RESET})' if not medium_unlocked else f'({GREEN}unlocked{RESET})'}")
 
         print("🔎 [4] View Opponents Beaten")
@@ -4039,7 +4062,9 @@ def minigame_hall(player_data, klare_data):
 
                 gold_bet = 50
                 enemy_count = 5 # only pick 5 of the 8 names
-                enemy_names = ["Joe", "Bob", "Frank", "Sue", "Tom", "Lily", "Max", "Emma"]
+                possible_names = ["Joe", "Bob", "Frank", "Sue", "Tom", "Lily", "Max", "Emma"]
+                enemy_names = random.sample(possible_names, 5)
+
 
                 Print(f"\nYou will play Liars Dice against {enemy_count} others for {gold_bet * enemy_count} gold")
 
@@ -4050,6 +4075,11 @@ def minigame_hall(player_data, klare_data):
         # Medium difficulty
         elif action == '2':
             if len(klare_data['easy_beaten']) == 8:
+
+                if player_data['gold'] < 40:
+                    minimum_bet = 1
+                else:
+                    minimum_bet = 40
 
                 # check whether player has over 75 gold to play liarsdice and select a random game
                 if player_data['gold'] >= 75:
@@ -4072,8 +4102,8 @@ def minigame_hall(player_data, klare_data):
                 else:
                     twentyone_max = player_data['gold']
 
-                if player_data['gold'] >= 50:
-                    higherlower_max = 50
+                if player_data['gold'] >= 70:
+                    higherlower_max = 70
                 else:
                     higherlower_max = player_data['gold']
 
@@ -4099,24 +4129,22 @@ def minigame_hall(player_data, klare_data):
                     play_21(player_data, klare_data, difficulty, enemy_name, game_stats)
 
                 elif random_game == "higherlower":
-
-                    while True:
                     
-                        gold_bet = random.randint(minimum_bet, higherlower_max)
+                    gold_bet = random.randint(minimum_bet, higherlower_max)
 
-                        Print(f"\nYou will play Higher or Lower starting with {gold_bet} gold")
-                        play_higherlower(player_data, klare_data, difficulty, gold_bet, game_stats)
-                        break
+                    Print(f"\nYou will play Higher or Lower starting with {gold_bet} gold")
+                    play_higherlower(player_data, klare_data, difficulty, gold_bet, game_stats)
 
                 elif random_game == "liarsdice":
 
                     gold_bet = 90
                     enemy_count = 5
-                    enemy_names = ["Oliver", "Mia", "Liam", "Sophia", "Noah", "Ava", "Ethan"]
+                    possible_names = ["Oliver", "Mia", "Liam", "Sophia", "Noah", "Ava", "Ethan", "Albert"]
+                    enemy_names = random.sample(possible_names, 5)
 
                     Print(f"\nYou will play Liars Dice against {enemy_count} others for {gold_bet * enemy_count} gold")
 
-                    play_liars_dice(player_data, klare_data, enemy_count, difficulty, enemy_names, game_stats)
+                    play_liars_dice(player_data, klare_data, enemy_count, difficulty, game_stats, gold_bet, enemy_names)
                 
                 current_hour += random.randint(1, 3)
 
@@ -4124,7 +4152,11 @@ def minigame_hall(player_data, klare_data):
                 Print("\nYou need to beat all of the 'Easy Tier' villagers first")
 
         elif action == '3':
-            if len(klare_data['medium_beaten']) == 7:
+            if len(klare_data['medium_beaten']) == 8:
+                if player_data['gold'] < 60:
+                    minimum_bet = 1
+                else:
+                    minimum_bet = 60
 
                 # check whether player has over 150 gold to play liarsdice and select a random game
                 if player_data['gold'] >= 150:
@@ -4134,7 +4166,7 @@ def minigame_hall(player_data, klare_data):
 
                 # setup difficulty and enemy names
                 difficulty = "medium"
-                enemy_name = random.choice(["Oliver", "Mia", "Liam", "Sophia", "Noah", "Ava", "Ethan"])
+                enemy_name = random.choice(["Oliver", "Mia", "Liam", "Sophia", "Noah", "Ava", "Ethan", "Albert"])
                 
                 # Setup max bets on minigames and reducing it if the player has under the gold amount
                 if player_data['gold'] >= 150:
@@ -4147,8 +4179,8 @@ def minigame_hall(player_data, klare_data):
                 else:
                     twentyone_max = player_data['gold']
 
-                if player_data['gold'] >= 50:
-                    higherlower_max = 50
+                if player_data['gold'] >= 150:
+                    higherlower_max = 150
                 else:
                     higherlower_max = player_data['gold']
 
@@ -4171,18 +4203,15 @@ def minigame_hall(player_data, klare_data):
 
                     Print(f"\nYou will play a game of 21 against {enemy_name} for {gold_bet} gold")
 
-                    play_21(player_data, klare_data, difficulty, enemy_name, game_stats)
+                    play_21(player_data, klare_data, difficulty, gold_bet, enemy_name, game_stats)
 
                 elif random_game == "higherlower":
-
-                    while True:
                     
-                        gold_bet = random.randint(minimum_bet, higherlower_max)
+                    gold_bet = random.randint(minimum_bet, higherlower_max)
 
-                        Print(f"\nYou will play Higher or Lower starting with {gold_bet} gold")
+                    Print(f"\nYou will play Higher or Lower starting with {gold_bet} gold")
 
-                        play_higherlower(player_data, klare_data, difficulty, gold_bet, game_stats)
-                        break
+                    play_liars_dice(player_data, klare_data, enemy_count, difficulty, game_stats, gold_bet, enemy_names)
 
                 elif random_game == "liarsdice":
 
@@ -4530,17 +4559,20 @@ def battle(player_data, game_stats):
             
             # Enemy Attacks
             enemy_damage = max(0, random.randint(base_enemy_damage - 3, base_enemy_damage + 5))
-            if enemy_damage >= 0:
-                if "Bow" in player_data['weapon_equipped']:
-                    dodge_roll = random.randint(1, 100)
-                    if dodge_roll <= 30:  # 30% chance to dodge
 
-                        # Increase game stat of times dodged by 1
-                        game_stats['times_dodged'] += 1
+            if "Bow" in player_data['weapon_equipped']:
+                dodge_roll = random.randint(1, 100)
+                if dodge_roll <= 30:
+                    game_stats['times_dodged'] += 1
                 else:
                     player_data['health'] -= enemy_damage
                     if check_death(player_data, game_stats, current_enemy['name']):
                         return
+            else:
+                player_data['health'] -= enemy_damage
+                if check_death(player_data, game_stats, current_enemy['name']):
+                    return
+
 
     else:
 
@@ -4780,6 +4812,7 @@ def start_story(player_data, settings, game_stats, klare_data):
 
             # Help menu
             while True:
+                input("\nPress Enter to continue: ")
                 os.system('cls') # Clear CMD
                 Print("-----Help Menu-----")
                 print("[1] How to win the game\n[2] Progressing through levels\n[3] What are enchants and how do they work?\n[4] List of enchants and their effects\n[5] How to spend gold and what to buy")
@@ -4844,7 +4877,7 @@ def start_story(player_data, settings, game_stats, klare_data):
 
             Print("\nHowler Recommended: 150 Health, 35 Damage, 10 Defence (Forest)")
             Print("Bigfoot Recommended: 500 Health, 80 Damage, 25 Defence (Frozen Peaks)")
-            Print("Baron Recommended: 800 Health, 150 Damage, 40 Defence (Klare)")
+            Print("Baron Recommended: 500 Health, 150 Damage, 40 Defence (Klare)")
             Print("Dragon Recommended: ???")
 
             if player_data['location'] == "Village of Klare":
@@ -4881,19 +4914,20 @@ def start_story(player_data, settings, game_stats, klare_data):
                     Print("As you leave the storm of the Frozen Peaks you look at Bigfoot's body and feel a sense of accomplishment")
                     if player_data['day'] < 30:
 
-                        Print("\nYou wander into Klare and are immedietly caught by a guard and taken to a hotel")
+                        Print("\nYou wander into Klare and are immedietly caught by a guard and taken to a hotel.")
                         time.sleep(1.5)
-                        Print("\n[Guard] The town is current on lockdown due to recent events, you will have to stay here for a while")
+                        Print("\n[Guard] The town is current on lockdown due to recent events, you will have to stay here for a while.")
                         time.sleep(1)
                         Print("\n[Knight] What happend??")
                         time.sleep(1.5)
-                        Print("\n[Guard] Accomodation is on us, but you will have to stay here until further notice, Goodbye")
+                        Print("\n[Guard] Accomodation is on us, but you will have to stay here until further notice, here's 150 gold for your troubles.")
                         time.sleep(1)
-                        Print("\nYou stay in the hotel, eating and resting until the lockdown is lifted")
+                        Print("\nYou stay in the hotel, eating and resting until the lockdown is lifted.")
 
                         days_passed = 30 - player_data['day']
                         player_data['day'] = 30
                         player_data['health'] = player_data['max_health']
+                        player_data['gold'] += 150
 
                         print(f"\n{days_passed} days later...")
                         time.sleep(1)
@@ -5286,10 +5320,6 @@ except Exception:
 
 # achievements
 
-# CLIMB UP MOUNTAIN FOR frost orb or even HIGHER FOR ENCHANTED frost orb. Basically make it gambling but you can quit and still win.
-# Possible idea for it is you start with 100 gold and can quit immedietly to claim 100 gold OR you can "climb" the mountain for multipliers and other rewards costing 10 gold per climb.
-# think like 30 stages to climb and you need just good RNG to reach the top kinda or can maybe sacrafise health for more gold?
-
 # fix frozen peakjs endless road reused stuff (lazy guy over here)
 # update endless storm frozen peaks, try and not sound like a copy and paste
 
@@ -5298,3 +5328,14 @@ except Exception:
 # or what 3 of the peoples dice are in liars dice instead of 2
 
 # add a gambling game where its like the impossible quiz but 10 gold per attempt.
+
+# V5.1
+
+#add confirmation to upgrading armour dawg (snow wanderer)
+#make items auto equip and stuff.
+#fix slime kingdom navigation feeling like poo
+#add a cap of like 200 gold to the middle aged man
+#snow wanderer says +50 health for potion when its actually 75
+#------ VILLAGE OF KLARE ----- <-- theres one less dash on the right side
+#-The rules are not to reach 21 without exceeding it. <-- Bad wording
+#killing baron removes guard from the minigame hall
