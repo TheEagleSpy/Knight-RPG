@@ -102,23 +102,46 @@ def load_slot(slot):
     if not os.path.exists(path):
         return None
 
-    with open(path, "r") as f:
-        data = json.load(f)
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
 
     defaults = get_default_values()
+
     # Merge missing keys into loaded data
     player = {**defaults["player_data"], **data.get("player_data", {})}
     klare = {**defaults["klare_data"], **data.get("klare_data", {})}
-    weapons = data.get("weapons_data", defaults["weapons_data"])
-    armour  = data.get("armour_data",  defaults["armour_data"])
     world = {**defaults["world_state"], **data.get("world_state", {})}
 
-    data["player_data"] = player
-    data["klare_data"] = klare
-    data["weapons_data"] = weapons
-    data["armour_data"] = armour
-    data["world_state"] = world
-    return data
+    def merge_items(saved, defaults):
+        saved = saved or []
+        by_name = {item.get("name"): item for item in saved if isinstance(item, dict)}
+        merged = []
+        for d in defaults:
+            name = d.get("name")
+            merged.append(by_name.get(name, d))
+        return merged
+
+    weapons = merge_items(
+        data.get("weapons_data"),
+        defaults["weapons_data"]
+    )
+
+    armour = merge_items(
+        data.get("armour_data"),
+        defaults["armour_data"]
+    )
+
+    return {
+        "player_data": player,
+        "klare_data": klare,
+        "weapons_data": weapons,
+        "armour_data": armour,
+        "world_state": world,
+        "metadata": data.get("metadata", {}),
+    }
 
 def delete_slot(slot):
     path = get_slot_path(slot)
