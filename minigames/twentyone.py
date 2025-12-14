@@ -165,23 +165,25 @@ def play_21(player_data, klare_data, difficulty, gold_bet, enemy_name, game_stat
     # Balance check
     if player_data.get("gold", 0) < gold_bet:
         Print("You do not have enough gold to make that bet.")
-        return player_data, klare_data
+        return player_data, klare_data, game_stats
 
     # Deduct bet upfront
     player_data["gold"] -= gold_bet
     Print("\n----- 21 Game -----")
     Print(f"Difficulty: {difficulty.capitalize()}")
     Print(f"Gold Bet: {gold_bet}")
-    Print(f"You placed a bet of {gold_bet} gold!")
 
-    # Best of five
+    # Reset trump cards (per match)
+    player_data["trump_cards"] = []
+
+    # Best of three
     player_wins = 0
     villager_wins = 0
 
-    while player_wins < 3 and villager_wins < 3:
+    while player_wins < 2 and villager_wins < 2:
         target_score = 21
 
-        # Fresh deck each round, values 1..13
+        # Fresh deck each round
         available_cards = list(range(1, 14))
         player_cards = []
         villager_cards = []
@@ -191,14 +193,13 @@ def play_21(player_data, klare_data, difficulty, gold_bet, enemy_name, game_stat
         player_trump_cards.append(draw_trump_card())
         player_data["trump_cards"] = player_trump_cards
 
-        # Villager gets two trumps each round
         villager_trump_cards = [draw_trump_card(), draw_trump_card()]
 
         Print("\nStarting a new round!")
         Print("\n----- Drawing Trump Cards -----")
         Print(f"\nYou draw the trump card: {', '.join(player_trump_cards)}")
 
-        # Initial cards, one each, hidden style
+        # Initial cards
         player_cards.append(random.choice(available_cards))
         available_cards.remove(player_cards[-1])
 
@@ -212,8 +213,8 @@ def play_21(player_data, klare_data, difficulty, gold_bet, enemy_name, game_stat
         player_stands = False
         villager_stands = False
 
-        # Round flow
         while not (player_stands and villager_stands):
+
             # Player turn
             if not player_stands:
                 Print("\n[1] Draw\n[2] Stand\n[3] Show Cards\n[4] Use Trump Card")
@@ -226,14 +227,11 @@ def play_21(player_data, klare_data, difficulty, gold_bet, enemy_name, game_stat
                         available_cards.remove(new_card)
                         Print(f"\nYou draw a {new_card}!")
                         villager_stands = False
-                    else:
-                        Print("No more cards available in the deck!")
                     if sum(player_cards) > target_score:
                         Print("You are currently over the target score.")
 
                 elif choice == "2":
-                    player_total = sum(player_cards)
-                    Print(f"\nYou stand with a total of {player_total}")
+                    Print(f"\nYou stand with a total of {sum(player_cards)}")
                     player_stands = True
 
                 elif choice == "3":
@@ -241,61 +239,58 @@ def play_21(player_data, klare_data, difficulty, gold_bet, enemy_name, game_stat
                     continue
 
                 elif choice == "4":
-                    target_score = trump_cards(player_trump_cards, target_score, player_cards, villager_cards, available_cards, enemy_name)
+                    target_score = trump_cards(
+                        player_trump_cards,
+                        target_score,
+                        player_cards,
+                        villager_cards,
+                        available_cards,
+                        enemy_name
+                    )
                     continue
 
                 else:
-                    Print("Invalid choice. Please select 1, 2, 3, or 4.")
+                    Print("Invalid choice.")
                     continue
 
             # Villager turn
             if not villager_stands:
-                target_score = ai_use_trump_cards(difficulty, villager_cards, player_cards, target_score, villager_trump_cards, available_cards, enemy_name)
+                target_score = ai_use_trump_cards(
+                    difficulty,
+                    villager_cards,
+                    player_cards,
+                    target_score,
+                    villager_trump_cards,
+                    available_cards,
+                    enemy_name
+                )
 
                 vill_total = sum(villager_cards)
                 player_total = sum(player_cards)
-                difficulty_l = difficulty.lower()
+                diff = difficulty.lower()
 
-                # ---------- AI DRAW LOGIC ----------
-                if difficulty_l == "easy":
+                if diff == "easy":
                     need_draw = vill_total < 17
-
-                elif difficulty_l == "medium":
+                elif diff == "medium":
                     need_draw = vill_total < 18
-
-                elif difficulty_l == "hard":
-                    need_draw = (
-                        vill_total < 17 or 
-                        vill_total < target_score - 2
-                    )
-
-                elif difficulty_l == "elite":
-
-                    # If player already busted, AI stands and wins
+                elif diff == "hard":
+                    need_draw = vill_total < 17 or vill_total < target_score - 2
+                else:  # elite
                     if player_total > target_score:
                         need_draw = False
-
-                    # If AI busted, no draw (round will resolve)
                     elif vill_total > target_score:
                         need_draw = False
-
-                    # If AI losing it will draw
                     elif vill_total < player_total:
                         need_draw = True
-
-                    # Otherwise stand
                     else:
                         need_draw = False
 
-                if need_draw:
-                    if available_cards:
-                        new_card = random.choice(available_cards)
-                        villager_cards.append(new_card)
-                        available_cards.remove(new_card)
-                        Print(f"{enemy_name} draws a {new_card}!")
-                        player_stands = False
-                    else:
-                        Print("No more cards available in the deck!")
+                if need_draw and available_cards:
+                    new_card = random.choice(available_cards)
+                    villager_cards.append(new_card)
+                    available_cards.remove(new_card)
+                    Print(f"{enemy_name} draws a {new_card}!")
+                    player_stands = False
                 else:
                     Print(f"\n{enemy_name} stands.")
                     villager_stands = True
@@ -308,72 +303,65 @@ def play_21(player_data, klare_data, difficulty, gold_bet, enemy_name, game_stat
         player_total = sum(player_cards)
         villager_total = sum(villager_cards)
 
-        # Outcome logic
         if player_total > target_score and villager_total > target_score:
-            # Both over, closer to target wins
             if abs(player_total - target_score) < abs(villager_total - target_score):
-                Print("\nYou were both over but you were closer to the target score! You win!")
+                Print("\nYou were closer to the target score! You win!")
                 player_wins += 1
             elif abs(villager_total - target_score) < abs(player_total - target_score):
-                Print(f"\nYou were both over but {enemy_name} was closer to the target score! They win!")
+                Print(f"\n{enemy_name} was closer! They win!")
                 villager_wins += 1
             else:
-                Print("\nYou were both over and had the same score... It is a tie!")
+                Print("\nIt is a tie!")
 
         elif player_total > target_score:
-            Print(f"\nYou went over! {enemy_name} wins this round.")
+            Print(f"\nYou went over! {enemy_name} wins.")
             villager_wins += 1
 
         elif villager_total > target_score:
-            Print(f"\n{enemy_name} went over! You win this round.")
+            Print(f"\n{enemy_name} went over! You win.")
             player_wins += 1
 
-        elif player_total == target_score and villager_total == target_score:
-            Print("\nBoth hit the target exactly... It is a tie!")
-
         elif player_total == target_score:
-            Print(f"\nYou got exactly {target_score} and won!")
+            Print("\nYou hit the target exactly! You win!")
             player_wins += 1
 
         elif villager_total == target_score:
-            Print(f"\n{enemy_name} got exactly {target_score} and won!")
+            Print(f"\n{enemy_name} hit the target exactly! They win!")
             villager_wins += 1
 
         else:
-            # Both under target, closer wins
             if abs(target_score - player_total) < abs(target_score - villager_total):
-                Print(f"\nYou were closer to {target_score} and won!")
+                Print("\nYou were closer! You win!")
                 player_wins += 1
             elif abs(target_score - villager_total) < abs(target_score - player_total):
-                Print(f"\n{enemy_name} was closer to {target_score} and won!")
+                Print(f"\n{enemy_name} was closer! They win!")
                 villager_wins += 1
             else:
-                Print("\nYou both had the same score... It is a draw!")
+                Print("\nIt is a draw!")
 
-        # Scoreboard
         Print(f"\nScore: You {player_wins} - {villager_wins} {enemy_name}\n")
 
     # Match end
     Print("Game Over!")
     game_stats['minigames_played'] += 1
+
     if player_wins > villager_wins:
-        Print("Congratulations! You win the best of 5!")
+        Print("You win the best of 3!")
         payout = gold_bet * 2
         player_data["gold"] += payout
         Print(f"You earn {payout} gold!")
         game_stats['gambles_won'] += 1
 
-        # Track beaten enemy by difficulty
         diff_key = f"{difficulty.lower()}_beaten"
-        if isinstance(klare_data, dict) and diff_key in klare_data:
-            if enemy_name not in klare_data[diff_key]:
-                klare_data[diff_key].append(enemy_name)
-        return player_data, klare_data, game_stats
+        if diff_key in klare_data and enemy_name not in klare_data[diff_key]:
+            klare_data[diff_key].append(enemy_name)
+
     else:
-        Print(f"{enemy_name} wins the best of 5. Better luck next time!")
+        Print(f"{enemy_name} wins the best of 3.")
         Print(f"You lose your {gold_bet} gold.")
         game_stats['gambles_lost'] += 1
-        return player_data, klare_data, game_stats
+
+    return player_data, klare_data, game_stats
 
 # ---------- STANDALONE TEST HARNESS ----------
 def _placeholder_klare_data():
