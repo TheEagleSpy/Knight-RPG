@@ -3870,12 +3870,13 @@ def explore_klare(player_data, weapons_data, armour_data, klare_data):
             time.sleep(2)
             os.system('cls')
             
-            if day_income > 0:
-                tax = int(day_income * 0.12)
-                player_data['gold'] -= tax
-                Print(f"**The Baron takes his cut of your earnings. -{tax} Gold**")
-            else:
-                Print("**You earned nothing today. The baron doesn't take any tax.**")
+            if world_state["killed_baron"] == False:
+                if day_income > 0:
+                    tax = int(day_income * 0.12)
+                    player_data['gold'] -= tax
+                    Print(f"**The Baron takes his cut of your earnings. -{tax} Gold**")
+                else:
+                    Print("**You earned nothing today. The baron doesn't take any tax.**")
 
             player_data['day'] += 1
             return
@@ -3897,12 +3898,13 @@ def explore_klare(player_data, weapons_data, armour_data, klare_data):
             time.sleep(2)
             os.system('cls')
             
-            if day_income > 0:
-                tax = int(day_income * 0.12)
-                player_data['gold'] -= tax
-                Print(f"**The Baron takes his cut of your earnings. -{tax} Gold**")
-            else:
-                Print("**You earned nothing today. The baron doesn't take any tax.**")
+            if world_state["killed_baron"] == False:
+                if day_income > 0:
+                    tax = int(day_income * 0.12)
+                    player_data['gold'] -= tax
+                    Print(f"**The Baron takes his cut of your earnings. -{tax} Gold**")
+                else:
+                    Print("**You earned nothing today. The baron doesn't take any tax.**")
 
             Print(f"\nThe village bell rings, it’s {current_hour}:00 PM. You head home")
             player_data['day'] += 1
@@ -4712,6 +4714,10 @@ def start_story(player_data, settings, game_stats, klare_data):
 
         # Makes sure player health isnt above max health
         if player_data['health'] > player_data['max_health']:
+            player_data['health'] = player_data['max_health']
+
+        # Player gets full health in klare
+        if player_data['location'] == "Village of Klare":
             player_data['health'] = player_data['max_health']
 
         # Makes sure crit chance isnt above 100
