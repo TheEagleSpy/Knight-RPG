@@ -3795,14 +3795,8 @@ def klare_villager_data():
         
     ]
 
-    Baron = {"name": "Baron", "health": 1000, "strength": 145, "gold": 0}
 
-    global fight_boss
-
-    if fight_boss == True:
-        current_enemy = Baron
-
-    return current_enemy, villagers
+    return villagers
 
 # Klare main menu
 def explore_klare(player_data, weapons_data, armour_data, klare_data):
@@ -4089,7 +4083,7 @@ def minigame_hall(player_data, klare_data):
 
                 # setup difficulty and enemy names
                 difficulty = "medium"
-                enemy_name = random.choice(["Oliver", "Mia", "Liam", "Sophia", "Noah", "Albert", "Ethan"])
+                enemy_name = random.choice(["Oliver", "Mia", "Liam", "Sophia", "Noah", "Ava", "Albert", "Ethan"])
                 
                 # Setup max bets on minigames and reducing it if the player has under the gold amount
                 if player_data['gold'] >= 125:
@@ -4126,7 +4120,7 @@ def minigame_hall(player_data, klare_data):
 
                     Print(f"\nYou will play a game of 21 against {enemy_name} for {gold_bet} gold")
 
-                    play_21(player_data, klare_data, difficulty, enemy_name, game_stats)
+                    play_21(player_data, klare_data, difficulty, gold_bet, enemy_name, game_stats)
 
                 elif random_game == "higherlower":
                     
@@ -4165,8 +4159,8 @@ def minigame_hall(player_data, klare_data):
                     random_game = random.choice(["rps", "21", "higherlower"])
 
                 # setup difficulty and enemy names
-                difficulty = "medium"
-                enemy_name = random.choice(["Oliver", "Mia", "Liam", "Sophia", "Noah", "Ava", "Ethan", "Albert"])
+                difficulty = "hard"
+                enemy_name = random.choice(["Charlotte", "Jack", "Amelia", "Henry", "Isabella"])
                 
                 # Setup max bets on minigames and reducing it if the player has under the gold amount
                 if player_data['gold'] >= 150:
@@ -4211,7 +4205,7 @@ def minigame_hall(player_data, klare_data):
 
                     Print(f"\nYou will play Higher or Lower starting with {gold_bet} gold")
 
-                    play_liars_dice(player_data, klare_data, enemy_count, difficulty, game_stats, gold_bet, enemy_names)
+                    play_higherlower(player_data, klare_data, difficulty, gold_bet, game_stats)
 
                 elif random_game == "liarsdice":
 
@@ -4221,7 +4215,7 @@ def minigame_hall(player_data, klare_data):
 
                     Print(f"\nYou will play Liars Dice against {enemy_count} others for {gold_bet * enemy_count} gold")
 
-                    play_liars_dice(player_data, klare_data, enemy_count, difficulty, enemy_names, game_stats)
+                    play_liars_dice(player_data, klare_data, enemy_count, difficulty, game_stats, gold_bet, enemy_names)
                 
                 current_hour += random.randint(1, 3)
 
@@ -4238,7 +4232,7 @@ def minigame_hall(player_data, klare_data):
                 print(f"{name}: {status}")
 
             print("\nMedium Tier:")
-            for name in ["Oliver", "Mia", "Liam", "Sophia", "Noah", "Albert", "Ethan"]:
+            for name in ["Oliver", "Mia", "Liam", "Sophia", "Noah", "Ava", "Albert", "Ethan"]:
                 status = f"({GREEN}BEATEN{RESET})" if name in klare_data['medium_beaten'] else f"({RED}UNBEATEN{RESET})"
                 print(f"{name}: {status}")
 
@@ -4478,10 +4472,7 @@ def battle(player_data, game_stats):
         current_enemy['strength'] = int(current_enemy['strength'] * scaling)
 
     elif player_data['location'] == 'Village of Klare':
-        current_enemy = klare_villager_data()
-    else:
-        Print("Unknown location!")
-        return
+        current_enemy = {"name": "Baron", "health": 1000, "strength": 145, "gold": 0}
 
     Print(f"\n{RED}-----Enemy Battle-----{RESET}\nYou encounter a {current_enemy['name']}!")
 
@@ -4854,6 +4845,8 @@ def start_story(player_data, settings, game_stats, klare_data):
             updatelog()
             
         elif action == '7':
+
+            global killed_baron
             
             os.system('cls') # Clear CMD
 
@@ -4936,7 +4929,6 @@ def start_story(player_data, settings, game_stats, klare_data):
                     Print("\n------ VILLAGE OF KLARE -----")
 
                 elif player_data['location'] == 'Village of Klare' and killed_baron == False: # Fight baron
-                    fight_boss = True
                     Print("\n[Knight] Baron, for too long have you ruled this village unfairly.")
                     Print("[Knight] All you do is take take take, and today I'm taking your life. 1v1 me lil bro")
                     Print("\n[Baron] Hahaha, you cannot defeat me knight, not even close.")
@@ -4944,12 +4936,12 @@ def start_story(player_data, settings, game_stats, klare_data):
                     if lost_to_baron == False:
                         Print("\n[Baron] How did a... a weak, old, fat, pathetic, broke, useless, miserable fool of a knight defeat ME?")
                         Print("\n[Knight] Nobody asked nerd.")
-                        game_stats['bosses_killed'] += 1
+                        game_stats['bosses_killed'] += 1         
+                        world_state["killed_baron"] = True
                         killed_baron = True
+                        apply_world_state_to_globals(world_state, globals())
                     else:
                         Print("\n\n[Baron] Haha, not even close knight, best you keep gambling and earning me money instead.")
-
-                    fight_boss = False
                 
                 else:
                     Print("\nHe's already dead bro, calm down.")
@@ -5242,21 +5234,22 @@ def start_ending(player_data, game_stats):
 def check_death(player_data, game_stats, enemy_name=None):
     if player_data['health'] <= 0:
 
-        # SPECIAL DEATH OVERRIDE
-        if enemy_name == "Baron":
-            global lost_to_baron
-
-            player_data['health'] = player_data['max_health']
-            player_data['gold'] = 50
-            lost_to_baron = True
-            return True
-
         if player_data['health_potions'] > 0:
             player_data['health_potions'] -= 1
             Print("\nYou used a health potion to save yourself from dying!\n+10 Health")
             player_data['health'] = 10
             game_stats['health_potions_used'] += 1
             return False
+        
+        if enemy_name == "Baron":
+            global lost_to_baron
+            if player_data['health'] <= 0:
+                player_data['health'] = player_data['max_health']
+                player_data['gold'] = 50
+                lost_to_baron = True
+                return True
+            else:
+                return False
 
         else:
             game_stats['battles_lost'] += 1
