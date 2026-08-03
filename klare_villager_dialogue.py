@@ -1,6 +1,6 @@
 import random, time
 
-from printdelay import Print
+from printdelay import *
 
 # Tracks which villager has been spoken to today
 villagers_talked = {
@@ -69,14 +69,14 @@ def talk_to_terry(day, player_data):
             if choice == '1':
                 Print("\n[Terry] Bitter? Maybe... But when you've sold everything worth anything, words come cheap")
                 time.sleep(1)
-                Print("\n[Knight] Maybe you just need a new start")
+                Print("\n[Knight] Maybe you just need a new start in a new place")
                 time.sleep(1)
-                Print("\n[Terry] Heh. New starts cost gold too")
+                Print("\n[Terry] Haha, new starts cost gold too")
                 return
                 
             # ---- 2. What do you mean? ----
             elif choice == '2':
-                Print("\n[Terry] I mean nothing here has value anymore. That sword of yours? Worthless, since no one can afford it.")
+                Print("\n[Terry] I mean nothing here has value anymore. That sword of yours? It's worthless since nobody can afford it.")
                 time.sleep(1)
                 Print("\n[Knight] Then how's a merchant still in business?")
                 time.sleep(1)
@@ -94,7 +94,7 @@ def talk_to_terry(day, player_data):
                         time.sleep(1)
                         Print("\n[Knight] Why doesn't he leave? He obviously has the money to do so")
                         time.sleep(1)
-                        Print("\n[Terry] He has connections that even the Baron does not, and so he is kept around.")
+                        Print("\n[Terry] He has... contacts, I'll say, that even the Baron does not, and so he stays in town for them, not us.")
                         return
                     
                     # Robbing comment
@@ -120,7 +120,7 @@ def talk_to_terry(day, player_data):
                     mini_choice = input("Enter: ")
 
                     if mini_choice == '1':
-                        Print("\n[Terry] No gold comes free. Not here, not anymore.")
+                        Print("\n[Terry] No gold is free. Not here, not anymore.")
                         return
 
                     elif mini_choice == '2':
@@ -128,7 +128,7 @@ def talk_to_terry(day, player_data):
                         return
                     
                     elif mini_choice == '3':
-                        Print("\n[Terry] Then best you use it wisely.")
+                        Print("\n[Terry] Then best you use it wisely knight.")
                         return
                     
                     elif mini_choice == 'r':
@@ -143,9 +143,9 @@ def talk_to_terry(day, player_data):
     # ---- DAYS 36 - 40 ----
     elif 36 <= day <= 40:
 
-        Print("\n[Terry] Supprised to see you still sane. I didn't think you'd last this long.")
+        Print("\n[Terry] Surprised to see you still sane. I didn't think you'd last this long.")
         time.sleep(1)
-        Print("\n[Knight] I am a knight after all.")
+        Print("\n[Knight] I am a knight after all...")
         time.sleep(1.5)
         Print("[Knight] You make it sound difficult to live here.")
         time.sleep(1)
@@ -271,7 +271,7 @@ def talk_to_terry(day, player_data):
                 time.sleep(1)
                 Print("\n[Knight] Do you know who spread that? Does it have anything to do with me coming to town?")
                 time.sleep(1)
-                Print("\n[Terry] Not at all, it was just a precaution... No, it was a 'just in case' type thing.")
+                Print("\n[Terry] Not at all, it was just a precaution... it was a 'just in case' type thing.")
                 time.sleep(1)
                 Print("\n[Knight] Right.")
                 time.sleep(1)
@@ -500,7 +500,7 @@ def talk_to_emily(day, player_data):
             elif choice == '2':
                 Print("\n[Emily] Hey, I’m glad you like it.")
                 time.sleep(1)
-                Print("\n[Emily] It’s one of the only cozy spots left in town.")
+                Print("[Emily] It’s one of the only cozy spots left in town.")
                 time.sleep(1)
                 Print("\n[Knight] I might actually sleep properly tonight.")
                 time.sleep(1)
@@ -510,7 +510,7 @@ def talk_to_emily(day, player_data):
             elif choice == '3':
                 Print("\n[Emily] They said it was for safety…")
                 time.sleep(1)
-                Print("\n[Emily] But no one ever explained what the danger actually was.")
+                Print("[Emily] But no one ever said what the danger actually was.")
                 time.sleep(1)
                 Print("\n[Knight] That doesn’t really help.")
                 time.sleep(1)
@@ -550,7 +550,7 @@ def talk_to_emily(day, player_data):
                 time.sleep(1)
                 Print("\n[Emily] Not anything particularly good but...")
                 Print("[Emily] In liars dice, if you have a high amount of 5s or 6s, I'd personally bet the total of dice you know +1")
-                Print("[Emily] This basically guarentees that by the time it's your turn again, the bid will be a bluff.")
+                Print("[Emily] This basically guarentees that by the time it's your turn again, the bid will be a bluff if its not already been called.")
                 time.sleep(1)
                 Print("\n[Knight] Sick, thanks.")
                 Print("\n[Emily] Here… take this too, one of the games is on me. 😊")
@@ -594,9 +594,9 @@ def talk_to_emily(day, player_data):
 
         Print("\n[Emily] So it’s really happening… you’re going for the dragon.")
         time.sleep(1)
-        Print("\n[Knight] Yeah. I'm getting close to all the gear and upgrades I need.")
+        Print("\n[Knight] Yeah. I'm getting close to all the gear and potions I need.")
         time.sleep(1)
-        Print(f"\n[Emily] Best you be quick. I hear that the dragon is specifically coming in {day_till_dragon} days and {hour_till_dragon} hours.")
+        Print(f"\n[Emily] Best you be quick. I hear that you go to fight the dragon in specifically {day_till_dragon} days and {hour_till_dragon} hours.")
         Print("[Emily] I just wanted to say I’m glad that you are going to fight this dragon.")
         time.sleep(1)
         Print("[Emily] If you succeed, maybe this town can go back to the way it was... and... maybe you could come back for me?")
