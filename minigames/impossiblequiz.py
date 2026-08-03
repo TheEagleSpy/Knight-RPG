@@ -25,7 +25,7 @@ def play_impossiblequiz():
             "answer": "C"
         },
         {
-            "q": "What number comes after 10?",
+            "q": "What comes after 10?",
             "options": ["A) 11", "B) 10.1", "C) Depends", "D) J"],
             "answer": "A"
         },
