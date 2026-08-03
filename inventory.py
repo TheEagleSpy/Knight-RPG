@@ -1,5 +1,5 @@
-import os
 import time
+from printdelay import *
 
 # ANSI color codes
 GREEN = "\033[92m"
@@ -92,7 +92,7 @@ def stat_comparison(current_item, new_item, item_type):
 def inventory_display(player_data, weapons_data, armour_data):
     while True:
         time.sleep(0.15)
-        os.system('cls')
+        clear_screen()
         print("-----Inventory Menu-----")
         print("[1] Weapons")
         print("[2] Armour")
@@ -115,7 +115,7 @@ def inventory_display(player_data, weapons_data, armour_data):
 
 # Display Weapons
 def display_weapons(player_data, weapons_data):
-    os.system('cls')
+    clear_screen()
     print("-----Weapons-----")
     owned_weapons = player_data['owned_weapons']
     equipped_weapon = player_data.get('weapon_equipped', "")
@@ -143,7 +143,7 @@ def display_weapons(player_data, weapons_data):
 
 # View Weapon Stats
 def view_weapon_stats(player_data, weapon, weapons_data):
-    os.system('cls')
+    clear_screen()
     current_weapon_name = player_data.get('weapon_equipped', None)
     current_weapon = None
     for w in weapons_data:
@@ -203,7 +203,7 @@ def get_enchant_bonus(item):
 
 # Display Armour
 def display_armour(player_data, armour_data):
-    os.system('cls')
+    clear_screen()
     print("-----Armour-----")
     owned_armour = player_data['owned_armour']
     equipped_armour = player_data.get('armour_equipped', "")
@@ -231,7 +231,7 @@ def display_armour(player_data, armour_data):
 
 # View Armour Stats
 def view_armour_stats(player_data, selected_armour, armour_list):
-    os.system('cls')
+    clear_screen()
     current_armour_name = player_data.get('armour_equipped', None)
     current_armour = None
     for armour in armour_list:
@@ -262,6 +262,46 @@ def get_equipped_armour_defence(player_data, armour_list):
             return armour['defence']
     return 0
 
+def get_weapon_score(weapon):
+    dmg_bonus, crit_bonus = get_enchant_bonus(weapon)
+
+    damage = weapon.get('damage', 0)
+    crit = weapon.get('crit_chance', 0) + crit_bonus
+
+    total_damage = damage + int(damage * dmg_bonus)
+
+    return total_damage * (1 + (crit / 100))
+
+def equip_weapon(player_data, weapon, weapons_data):
+    old_weapon_name = player_data.get('weapon_equipped', None)
+    old_weapon_crit = 0
+    old_weapon = None
+
+    if old_weapon_name:
+        for w in weapons_data:
+            if w['name'] == old_weapon_name:
+                old_weapon = w
+                _, old_crit_bonus = get_enchant_bonus(w)
+                old_weapon_crit = w.get('crit_chance', 0) + old_crit_bonus
+                break
+
+    # Don't equip if the new weapon is worse
+    if old_weapon and get_weapon_score(weapon) <= get_weapon_score(old_weapon):
+        return False
+
+    # Remove old crit chance
+    player_data['crit_chance'] -= old_weapon_crit
+
+    # Equip new weapon
+    player_data['weapon_equipped'] = weapon['name']
+
+    # Add new crit chance
+    _, new_crit_bonus = get_enchant_bonus(weapon)
+    new_weapon_crit = weapon.get('crit_chance', 0) + new_crit_bonus
+    player_data['crit_chance'] += new_weapon_crit
+
+    return True
+    
 # Use Health Potion
 def use_health_potion(player_data):
     if player_data['health_potions'] > 0:
