@@ -1,5 +1,6 @@
 import os, json
 from datetime import datetime
+from printdelay import *
 
 SAVE_FOLDER = "saves"
 MAIN_FILE = "globalsavedata.json"
@@ -10,7 +11,7 @@ if not os.path.exists(SAVE_FOLDER):
     os.makedirs(SAVE_FOLDER)
 
 def view_game_stats(game_stats):
-    os.system('cls')
+    clear_screen()
     print("----- Game Stats -----")
     for key, value in game_stats.items():
         formatted_key = key.replace('_', ' ').title()
@@ -43,11 +44,11 @@ def list_save_slots():
     return slots
 
 def get_world_state_from_globals(global_dict):
+    defaults = get_default_values()["world_state"]
+
     return {
-        k: v for k, v in global_dict.items()
-        if not k.startswith("__")
-        and not callable(v)
-        and isinstance(v, (bool, int, float, str))
+        key: global_dict.get(key, default_value)
+        for key, default_value in defaults.items()
     }
 
 def apply_world_state_to_globals(world_state, global_dict):
@@ -153,6 +154,7 @@ def get_default_values():
         "skip_battles": False,
         "skip_intro": False,
         "enter_to_continue": True,
+        "print_speed": 0.02,
     }
 
     default_stats = {
@@ -262,13 +264,27 @@ def get_default_values():
     default_world_state = {
         "healed_today": True,
         "upgraded_armour": False,
+        "fight_caveman": False,
+        "fight_campfire_bandit": False,
+        "fight_bandit_outpost": False,
+        "fight_ghost": False,
+        "fight_merchant": False,
+        "fight_black_knight": False,
+        "fight_endless_road_skeleton": False,
+        "fight_bandit_leader": False,
+        "fight_villager": False,
+        "fight_elder_yeti": False,
+        "fight_caravan": False,
+        "fight_boss": False,
+        "killed_baron": False,
+        "lost_to_baron": False,
+        "viewed_map": False,
         "helped_bob": False,
         "seen_bob": False,
         "seen_bounty_hunter": False,
-        "killed_baron": False,
         "storm_power": 0,
         "picked_events_left": 0,
-        "colours_left": 5,
+        "colours_left": 6,
         "memory_sequence": [],
     }
 
