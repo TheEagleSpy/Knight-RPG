@@ -349,7 +349,7 @@ def play_21(player_data, klare_data, difficulty, gold_bet, enemy_name, game_stat
         Print("You win the best of 3!")
         payout = gold_bet * 2
         player_data["gold"] += payout
-        Print(f"You earn {payout} gold!")
+        Print(f"You earn {gold_bet} gold!")
         game_stats['gambles_won'] += 1
 
         diff_key = f"{difficulty.lower()}_beaten"
