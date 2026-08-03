@@ -1,8 +1,8 @@
 from functools import partial
 
 def reward_strength(player_data):
-    player_data['strength'] += 2
-    print("Your strength has increased by 2!")
+    player_data['strength'] += 1
+    print("Your strength has increased by 1!")
 
 def reward_max_health(player_data):
     player_data['max_health'] += 15
@@ -21,21 +21,28 @@ def reward_defence(player_data):
     print("Your defence has increased by 2!")
     
 def reward_crit(player_data):
-    player_data['crit'] += 7
+    player_data['crit_chance'] += 7
     print("Your critical chance has increased by 7%!")
 
 def reward_armour(player_data, armour_data):
-    for armour in armour_data:
-        if armour['name'] == player_data['armour_equipped']:
-            armour['defence'] += 3
-            player_data['defence'] += 3
-            print(f"Your {armour['name']} has been upgraded!\n+3 Armour Toughness")
+    for armour_item in armour_data:
+        if armour_item['name'] == player_data['armour_equipped']:
+            armour_item['defence'] += 2
+            print(f"Your {armour_item['name']} has been upgraded!\n+2 Armour Defence")
+            return True
+
+    print("No matching equipped armour was found.")
+    return False
         
 def reward_weapon(player_data, weapons_data):
     for weapon in weapons_data:
         if weapon['name'] == player_data['weapon_equipped']:
             weapon['damage'] += 2
-            print(f"Your {weapon['name']} has been upgraded!\n+2 Damage")
+            print(f"Your {weapon['name']} has been upgraded!\n+2 Weapon Damage")
+            return True
+
+    print("No matching equipped weapon was found.")
+    return False
 
 def geniewish(player_data, weapons_data, armour_data):
     wish_rewards = {
