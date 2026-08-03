@@ -212,151 +212,398 @@ def ai_take_turn(
     global_memory,
     difficulty,
     noise_gate=True
-    ):
-    diff = difficulty
+):
+    diff = str(difficulty).strip().lower()
+
+    if diff not in ("easy", "medium", "hard"):
+        diff = "medium"
+
     total_players_left = len(active_players)
-    total_dice = sum(len(d) for d in active_players.values())
+    total_dice = sum(len(dice) for dice in active_players.values())
+
     dice = active_players[player]
-    partner_dice_list = all_partner_dice(player, partners, active_players)
+    partner_dice_list = all_partner_dice(
+        player,
+        partners,
+        active_players
+    )
 
-    # pacing
-    time.sleep(0.015 if total_players_left > 20 else 0.1)
+    silent = False
+    
+    # Only delay turns while the player is watching.
+    if not silent:
+        time.sleep(0.015 if total_players_left > 20 else 0.1)
 
-    # dialogue printing — never skip any AI dialogue
     def maybe_print(line):
-        Print(line)
+        if not silent:
+            Print(line)
+
+    def get_bid_probability(bid_qty, bid_face):
+        known_count = dice.count(bid_face)
+        known_count += partner_dice_list.count(bid_face)
+
+        unknown_dice = max(
+            0,
+            total_dice - len(dice) - len(partner_dice_list)
+        )
+
+        needed_from_unknown = max(
+            0,
+            bid_qty - known_count
+        )
+
+        probability = prob_at_least(
+            needed_from_unknown,
+            unknown_dice,
+            p=1 / 6
+        )
+
+        return probability, known_count
 
     _ensure_ai(global_memory, player)
     self_stats = global_memory[player]
-    defend_success_self = (self_stats["defended_success"] /
-                           max(1, self_stats["defended_success"] + self_stats["bluffs_caught"]))
-    bluff_success_self = (self_stats["bluff_success"] / max(1, self_stats["bluffs_made"]))
 
-    conf_windows = {
-        "easy":   (0.28, 0.45),
-        "medium": (0.50, 0.65),
-        "hard":   (0.85, 0.95)
-    }
-    low, high = conf_windows.get(diff, (0.50, 0.65))
+    defend_success_self = (
+        self_stats["defended_success"]
+        / max(
+            1,
+            self_stats["defended_success"]
+            + self_stats["bluffs_caught"]
+        )
+    )
+
+    bluff_success_self = (
+        self_stats["bluff_success"]
+        / max(1, self_stats["bluffs_made"])
+    )
 
     # Opening bid
     if not current_bid:
-        min_open = max(2, total_dice // 10)
-        face_counts = {f: dice.count(f) for f in range(1, 7)}
-        common_face = max(face_counts, key=face_counts.get)
-        face_guess = common_face if random.random() < 0.7 else random.randint(2, 5)
+        known_dice = dice + partner_dice_list
 
-        # Hard always considers partners, Medium often, Easy sometimes
-        base_qty = dice.count(face_guess)
-        if diff == "hard":
-            base_qty += sum(1 for v in partner_dice_list if v == face_guess)
-        elif diff == "medium" and random.random() < 0.6:
-            base_qty += sum(1 for v in partner_dice_list if v == face_guess)
-        elif diff == "easy" and random.random() < 0.35:
-            base_qty += sum(1 for v in partner_dice_list if v == face_guess)
+        face_counts = {
+            face: known_dice.count(face)
+            for face in range(1, 7)
+        }
 
-        base_qty = max(min_open, base_qty)
-        confidence_factor = 1.0 + (bluff_success_self - 0.5) * (0.4 if diff == "hard" else 0.25)
-        qty_guess = int(max(min_open, min(base_qty + random.choice([0, 1]) * confidence_factor, total_dice)))
-        maybe_print(f"\n{random.choice(table_talk['pre_bid']).format(name=player, next_qty=qty_guess, face=face_guess, target='Knight')}")
-        Print(f"{player} opens with {qty_guess} {face_guess}'s.\n")
-        return (qty_guess, face_guess), player, False, None
+        if random.random() < 0.75:
+            face_guess = max(
+                face_counts,
+                key=face_counts.get
+            )
+        else:
+            face_guess = random.randint(1, 6)
 
-    # Evaluate call vs raise
+        known_count = face_counts[face_guess]
+
+        unknown_dice = max(
+            0,
+            total_dice - len(known_dice)
+        )
+
+        expected_total = (
+            known_count
+            + unknown_dice / 6
+        )
+
+        aggression = 0.72
+        aggression += (
+            bluff_success_self - 0.5
+        ) * 0.12
+
+        if diff == "easy":
+            aggression -= 0.05
+        elif diff == "hard":
+            aggression += 0.05
+
+        qty_guess = max(
+            2,
+            min(
+                total_dice,
+                int(round(expected_total * aggression))
+            )
+        )
+
+        dialogue = random.choice(
+            table_talk["pre_bid"]
+        ).format(
+            name=player,
+            next_qty=qty_guess,
+            face=face_guess,
+            target="Knight"
+        )
+
+        maybe_print(f"\n{dialogue}")
+        maybe_print(f"{player} opens with {qty_guess} {face_guess}'s.\n")
+
+        return (
+            (qty_guess, face_guess),
+            player,
+            False,
+            None
+        )
+
     qty, face = current_bid
 
-    known_count = dice.count(face)
-    # Hard always counts partners, Medium usually, Easy sometimes
-    if diff == "hard" or (diff == "medium" and random.random() < 0.75) or (diff == "easy" and random.random() < 0.35):
-        known_count += sum(1 for v in partner_dice_list if v == face)
+    current_probability, current_known = (
+        get_bid_probability(qty, face)
+    )
 
-    unknown_dice = total_dice - len(dice) - len(partner_dice_list)
-    need = max(0, qty - known_count)
-    p_true = prob_at_least(need, unknown_dice, p=1/6)
+    # Never call when the AI and its partner
+    # can already prove the bid is true.
+    if current_known >= qty:
+        call_chance = 0.0
 
-    estimate_factor = random.uniform(low, high)
-    if total_players_left > 10:
-        estimate_factor = min(0.9, max(0.7, estimate_factor - 0.05))
-    if total_players_left <= 4:
-        estimate_factor = random.uniform(0.9, 1.05)
+    # Automatically call extremely high bids.
+    #
+    # Example:
+    # 8 out of 12 dice is 66.7%.
+    # The AI calls unless its known dice prove all 8.
+    elif qty / max(1, total_dice) >= 0.65:
+        return (
+            current_bid,
+            current_bidder,
+            True,
+            player
+        )
 
-    estimated_total = known_count + int(unknown_dice * estimate_factor) + random.randint(-1, 1)
-    bluff_margin = qty - estimated_total
+    # Probability-based call chance.
+    elif current_probability <= 0.01:
+        return (
+            current_bid,
+            current_bidder,
+            True,
+            player
+        )
 
-    call_chance = 0.06 + max(0, bluff_margin) * 0.10
-    call_chance += (1.0 - p_true) * (0.60 if diff == "hard" else 0.40)
+    elif current_probability < 0.05:
+        call_chance = 0.98
 
-    # Additional large-table sanity: if qty is well below expectation, be reluctant to call
-    expected = total_dice / 6.0
-    variance = total_dice * (1/6) * (5/6)
-    std = max(1.0, variance ** 0.5)
-    if total_dice >= 60:
-        if qty <= expected - 0.5 * std:
-            call_chance *= 0.25
-        elif qty <= expected:
-            call_chance *= 0.5
+    elif current_probability < 0.10:
+        call_chance = 0.90
 
-    # Sanity floor
-    if qty <= max(2, total_dice // 4) and p_true > 0.60:
-        call_chance *= 0.10
+    elif current_probability < 0.20:
+        call_chance = 0.78
 
-    threshold_quarter = max(3, (total_dice + 4) // 4)
-    if qty > threshold_quarter:
-        call_chance += 0.12 * (qty - threshold_quarter)
-    if qty > 8:
-        call_chance += 0.08 + (qty - 8) * 0.02
+    elif current_probability < 0.35:
+        call_chance = 0.55
 
-    if diff == "easy":
-        call_chance *= 0.75
-    elif diff == "hard":
-        call_chance *= 0.85
+    elif current_probability < 0.50:
+        call_chance = 0.30
 
+    elif current_probability < 0.70:
+        call_chance = 0.14
+
+    else:
+        call_chance = 0.04
+
+    # High quantities become more suspicious.
+    if current_known < qty:
+        table_pressure = (
+            qty / max(1, total_dice)
+        )
+
+        call_chance += max(
+            0.0,
+            table_pressure - 0.35
+        ) * 1.15
+
+    # Use memory about the current bidder.
     bidder = current_bidder
+
     if bidder:
         _ensure_ai(global_memory, bidder)
-        opp = global_memory[bidder]
-        opp_defend_success_rate = (opp["defended_success"] /
-                                   max(1, opp["defended_success"] + opp["bluffs_caught"]))
-        opp_bluff_rate = (opp["bluffs_made"] / max(1, opp["truths_made"] + opp["bluffs_made"]))
-        opp_bluff_success_rate = (opp["bluff_success"] / max(1, opp["bluffs_made"]))
-        call_chance *= (1.0 + (opp_bluff_rate - 0.5) * (0.8 if diff == "hard" else 0.5))
-        call_chance *= (1.0 - (opp_defend_success_rate - 0.5) * (0.5 if diff == "hard" else 0.3))
-        call_chance *= (1.0 - (opp_bluff_success_rate - 0.5) * 0.15)
+        opponent_stats = global_memory[bidder]
 
-    # Partner friendliness: medium/hard 10–20% less likely to call partners
-    if bidder and bidder in partners.get(player, []):
+        opponent_bluff_rate = (
+            opponent_stats["bluffs_made"]
+            / max(
+                1,
+                opponent_stats["truths_made"]
+                + opponent_stats["bluffs_made"]
+            )
+        )
+
+        opponent_defend_rate = (
+            opponent_stats["defended_success"]
+            / max(
+                1,
+                opponent_stats["defended_success"]
+                + opponent_stats["bluffs_caught"]
+            )
+        )
+
+        call_chance *= (
+            1.0
+            + (opponent_bluff_rate - 0.5) * 0.45
+        )
+
+        call_chance *= (
+            1.0
+            - (opponent_defend_rate - 0.5) * 0.25
+        )
+
+    # Trust partners slightly more, unless their bid
+    # already has a probability below 20%.
+    if (
+        bidder
+        and bidder in partners.get(player, [])
+        and current_probability >= 0.20
+    ):
         if diff == "hard":
-            call_chance *= 0.8
+            call_chance *= 0.82
         elif diff == "medium":
-            call_chance *= 0.85
+            call_chance *= 0.88
         else:
-            call_chance *= 0.95
+            call_chance *= 0.94
+
+    if diff == "easy":
+        call_chance *= 0.88
+    elif diff == "hard":
+        call_chance *= 1.08
 
     if total_players_left <= 4:
-        call_chance *= 1.6
+        call_chance *= 1.20
 
-    call_chance = max(0.02, min(call_chance, 0.95))
+    call_chance = max(
+        0.0,
+        min(call_chance, 0.98)
+    )
 
-    # Decision
     if random.random() < call_chance:
-        return current_bid, current_bidder, True, player
-    else:
-        have = dice.count(face)
-        partner_have = sum(1 for v in partner_dice_list if v == face)
-        total_have = have + partner_have
-        conservative = qty >= max(9, threshold_quarter)
-        confidence_factor = 1.0 + (defend_success_self - 0.5) * (0.45 if diff == "hard" else 0.25) \
-                                + (bluff_success_self - 0.5) * (0.30 if diff == "hard" else 0.20)
-        if total_have >= 2 and not conservative:
-            inc_raw = random.choice([1, 1, 2])
-        else:
-            inc_raw = 1 if conservative or random.random() < 0.9 else 0
-        inc = max(1, int(round(inc_raw * confidence_factor)))
-        new_qty = min(qty + inc, total_dice)
-        face_bump_chance = 0.65 + (confidence_factor - 1.0) * 0.2
-        new_face = face if random.random() < min(0.95, max(0.05, face_bump_chance)) else min(6, face + random.choice([0, 1]))
-        maybe_print(f"\n{random.choice(table_talk['raise']).format(name=player, new_qty=new_qty, new_face=new_face)}\n")
-        return (new_qty, new_face), player, False, None
+        return (
+            current_bid,
+            current_bidder,
+            True,
+            player
+        )
+
+    # Only consider small raises.
+    #
+    # Quantity can never increase by more than one.
+    possible_raises = []
+
+    # Same quantity, face increases by one.
+    if face < 6:
+        possible_raises.append(
+            (qty, face + 1)
+        )
+
+    # Quantity increases by one, same face.
+    if qty < total_dice:
+        possible_raises.append(
+            (qty + 1, face)
+        )
+
+    # Quantity and face both increase by one.
+    if qty < total_dice and face < 6:
+        possible_raises.append(
+            (qty + 1, face + 1)
+        )
+
+    acceptable_raises = []
+
+    for candidate_qty, candidate_face in possible_raises:
+        (
+            candidate_probability,
+            candidate_known
+        ) = get_bid_probability(
+            candidate_qty,
+            candidate_face
+        )
+
+        # Do not make an extremely high bid unless
+        # known dice already prove it.
+        if (
+            candidate_qty / max(1, total_dice) >= 0.65
+            and candidate_known < candidate_qty
+        ):
+            continue
+
+        # Never raise to a bid with less than a
+        # 20% chance of being true.
+        if candidate_probability < 0.20:
+            continue
+
+        support_ratio = (
+            candidate_known
+            / max(1, candidate_qty)
+        )
+
+        score = (
+            candidate_probability
+            + support_ratio * 0.20
+        )
+
+        # Prefer a simple quantity increase.
+        if (
+            candidate_qty == qty + 1
+            and candidate_face == face
+        ):
+            score += 0.04
+
+        # Face-only raises are also conservative.
+        if (
+            candidate_qty == qty
+            and candidate_face == face + 1
+        ):
+            score += 0.02
+
+        # Raising both is more aggressive.
+        if (
+            candidate_qty == qty + 1
+            and candidate_face == face + 1
+        ):
+            score -= 0.05
+
+        score += (
+            defend_success_self - 0.5
+        ) * 0.04
+
+        score += random.uniform(
+            -0.025,
+            0.025
+        )
+
+        acceptable_raises.append(
+            (
+                score,
+                candidate_qty,
+                candidate_face
+            )
+        )
+
+    # Every available raise is too unlikely,
+    # so call the previous bid instead.
+    if not acceptable_raises:
+        return (
+            current_bid,
+            current_bidder,
+            True,
+            player
+        )
+
+    _, new_qty, new_face = max(
+        acceptable_raises,
+        key=lambda option: option[0]
+    )
+
+    dialogue = random.choice(
+        table_talk["raise"]
+    ).format(
+        name=player,
+        new_qty=new_qty,
+        new_face=new_face
+    )
+
+    maybe_print(f"\n{dialogue}\n")
+
+    return (
+        (new_qty, new_face),
+        player,
+        False,
+        None
+    )
 
 # Main game loic
 def play_liars_dice(player_data, klare_data, enemy_count, difficulty, game_stats, gold_bet, enemy_names, silent=None):
@@ -458,7 +705,13 @@ def play_liars_dice(player_data, klare_data, enemy_count, difficulty, game_stats
             clear_cmd()
 
         use_fast = len(active_players) >= 15
-        render_turn_order(round_order, alive_set, starter, fast=use_fast)
+        if not silent:
+            render_turn_order(
+                round_order,
+                alive_set,
+                starter,
+                fast=use_fast
+            )
 
         # Roll dice
         for name in list(active_players.keys()):
@@ -698,33 +951,46 @@ def play_liars_dice(player_data, klare_data, enemy_count, difficulty, game_stats
                         current_bidder=current_bidder,
                         global_memory=global_memory,
                         difficulty=diff,
-                        noise_gate=True
+                        noise_gate=True,
+                        silent=silent
                     )
 
                     if wants_reveal:
                         caller_this_round = caller or player
-                        # Bluff call line remains slow Print for drama
-                        Print(f"\n{random.choice(table_talk['call_bluff']).format(name=caller_this_round)}\n")
 
                         qty, face = current_bid
-                        # Reveal all dice (fast or slow)
-                        if len(active_players) >= 15:
-                            print("\n--- ALL DICE REVEALED ---")
-                            for name, dice in active_players.items():
-                                print(f"{name}: {dice}")
-                            print("--------------------------\n")
-                        else:
-                            Print("\n--- ALL DICE REVEALED ---")
-                            for name, dice in active_players.items():
-                                Print(f"{name}: {dice}")
-                            Print("--------------------------\n")
+                        actual_count = sum(
+                            player_dice.count(face)
+                            for player_dice in active_players.values()
+                        )
 
-                        actual_count = sum(d.count(face) for d in active_players.values())
-                        msg = f"The bid was {qty} {face}'s, there are {actual_count} {face}'s."
-                        if len(active_players) >= 15:
-                            fast_print(msg)
-                        else:
-                            Print(msg)
+                        if not silent:
+                            Print(
+                                f"\n{random.choice(table_talk['call_bluff']).format(name=caller_this_round)}\n"
+                            )
+
+                            if len(active_players) >= 15:
+                                print("\n--- ALL DICE REVEALED ---")
+
+                                for name, player_dice in active_players.items():
+                                    print(f"{name}: {player_dice}")
+
+                                print("--------------------------\n")
+                                print(
+                                    f"The bid was {qty} {face}'s, "
+                                    f"there are {actual_count} {face}'s."
+                                )
+                            else:
+                                Print("\n--- ALL DICE REVEALED ---")
+
+                                for name, player_dice in active_players.items():
+                                    Print(f"{name}: {player_dice}")
+
+                                Print("--------------------------\n")
+                                Print(
+                                    f"The bid was {qty} {face}'s, "
+                                    f"there are {actual_count} {face}'s."
+                                )
 
                         bidder = current_bidder
                         was_truth = actual_count >= qty
@@ -738,10 +1004,11 @@ def play_liars_dice(player_data, klare_data, enemy_count, difficulty, game_stats
                         if was_truth:
                             # caller out
                             out_name = caller_this_round
-                            if len(active_players) >= 15:
-                                fast_print(f"{out_name} loses the bluff and is OUT!")
-                            else:
-                                Print(f"{out_name} loses the bluff and is OUT!")
+                            if not silent:
+                                if len(active_players) >= 15:
+                                    print(f"{out_name} loses the bluff and is OUT!")
+                                else:
+                                    Print(f"{out_name} loses the bluff and is OUT!")
                             if out_name in active_players:
                                 del active_players[out_name]
                                 elimination_order.append(out_name)
@@ -757,10 +1024,11 @@ def play_liars_dice(player_data, klare_data, enemy_count, difficulty, game_stats
 
                         else:
                             # bidder out
-                            if len(active_players) >= 15:
-                                fast_print(f"{bidder} was bluffing and is OUT!")
-                            else:
-                                Print(f"{bidder} was bluffing and is OUT!")
+                            if not silent:
+                                if len(active_players) >= 15:
+                                    print(f"{bidder} was bluffing and is OUT!")
+                                else:
+                                    Print(f"{bidder} was bluffing and is OUT!")
                             if bidder in active_players:
                                 del active_players[bidder]
                                 elimination_order.append(bidder)
@@ -815,9 +1083,13 @@ def play_liars_dice(player_data, klare_data, enemy_count, difficulty, game_stats
             if choice == "2":
                 skip_to_results = True
                 silent = True  # suppress all drama/pauses going forward
+    
+        if skip_to_results:
+            silent = False
+            clear_cmd()
 
-    survivors = list(active_players.keys())
-    slow_or_fast_print("\nFinal survivors reached.\n")
+        survivors = list(active_players.keys())
+        slow_or_fast_print("\nFinal survivors reached.\n")
 
     # Show partner pairs (compact)
     if not silent:
@@ -1069,8 +1341,3 @@ if __name__ == "__main__":
 # when ais raise to a higher face, they keep the amount the same eg 3 4s to 3 5s
 
 # add nudging, where you can nudge your teammate by 20% to bluff or raise
-
-# MAX IS A MADMAN WHAT (why did it happen?)
-#[Tom] Let’s see how you guys handle 5 3's.
-#[Max] This is the last truthful bid. 9 3's.
-#[Frank] Let's go with 10 3's.
