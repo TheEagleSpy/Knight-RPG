@@ -204,7 +204,7 @@ def updatelog():
     print("Health Crystal: (350 gold) -> (250 gold)")
     print("\n-----Current Version: V5.1-----")
     print("-MAC SUPPORT!!")
-    print("-Bought weapons now auto equip if they are better than your current weapon")
+    print("-Bought weapons and armour now auto equip if they are better than your current weapon")
     print("-You are now guaranteed to see the slime kingdom at least twice")
     print("-Added a new setting to change the print speed of the game text")
     print("-Fixed the memory game not restarting after completing or failing the final colour guess")
