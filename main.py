@@ -2635,24 +2635,27 @@ def forest_blacksmith(player_data, weapons_data, armour_data, game_stats):
 
                 elif action in armour_map:
 
-                    name, cost = armour_map[action]
-                    new_armour = get_armour_by_name(name)
+                    armour_name, cost = armour_map[action]
+                    selected_armour = get_armour_by_name(armour_name)
 
                     if player_data['gold'] < cost:
                         Print("[Blacksmith] Not enough gold")
                         continue
 
-                    stat_comparison(
-                        get_armour_by_name(player_data['armour_equipped']),
-                        new_armour,
-                        "armour"
-                    )
+                    stat_comparison(get_armour_by_name(player_data['armour_equipped']), selected_armour, "armour")
 
                     if input("\nPress Enter to confirm or 'r' to cancel: ") == "":
-
                         Print(f"\n-{cost} Gold")
                         player_data['gold'] -= cost
                         player_data['owned_armour'].append(name)
+
+                        # add new armour defence
+                        old_def = get_equipped_armour_defence(player_data, armour_data)
+                        player_data['defence'] -= old_def
+
+                        player_data['armour_equipped'] = armour_name
+
+                        player_data['defence'] += selected_armour['defence']
 
                         Print("\n[Blacksmith] You're welcome knight, this is the best armour in the forest")
                         game_stats['items_bought'] += 1
@@ -3838,18 +3841,15 @@ def frozen_peaks_blacksmith(player_data, weapons_data, armour_data, game_stats):
 
 
                 elif action in armour_map:
-                    name, cost = armour_map[action]
-                    new_armour = get_armour_by_name(name)
+                    armour_name, cost = armour_map[action]
+                    selected_armour = get_armour_by_name(armour_name)
 
                     if player_data['gold'] < cost:
                         Print("\n[Goblin Tinkerer] Not enough.")
                         continue
 
-                    stat_comparison(
-                        get_armour_by_name(player_data['armour_equipped']),
-                        new_armour,
-                        "armour"
-                    )
+                    stat_comparison(get_armour_by_name(player_data['armour_equipped']), selected_armour, "armour")
+
 
                     if input("\nPress Enter to buy or 'r' to cancel: ").lower() == "":
                         Print(f"\n-{cost} Gold")
@@ -3860,7 +3860,7 @@ def frozen_peaks_blacksmith(player_data, weapons_data, armour_data, game_stats):
                         player_data['defence'] -= old_def
 
                         player_data['armour_equipped'] = name
-                        player_data['defence'] += new_armour['defence']
+                        player_data['defence'] += selected_armour['defence']
 
                         game_stats['items_bought'] += 1
 
@@ -4515,7 +4515,7 @@ def klare_merchant(player_data, weapons_data, armour_data):
             }
 
             armour_name, cost = armour_map[action]
-            new_armour = get_armour_by_name(armour_name)
+            selected_armour = get_armour_by_name(armour_name)
 
             if player_data['gold'] < cost:
                 Print("\n[Old Merchant] Sorry but you can't afford this item.")
@@ -4528,11 +4528,7 @@ def klare_merchant(player_data, weapons_data, armour_data):
             Print(f"\n[Knight] May I try on your {armour_name}?")
             time.sleep(0.4)
 
-            stat_comparison(
-                get_armour_by_name(player_data['armour_equipped']),
-                new_armour,
-                "armour"
-            )
+            stat_comparison(get_armour_by_name(player_data['armour_equipped']), selected_armour, "armour")
 
             if input("\nPress Enter to confirm or 'r' to cancel: ").lower() == "r":
                 Print("\n[Old Merchant] Very well, knight.")
@@ -4546,7 +4542,7 @@ def klare_merchant(player_data, weapons_data, armour_data):
             player_data['defence'] -= old_def
 
             player_data['armour_equipped'] = armour_name
-            player_data['defence'] += new_armour['defence']
+            player_data['defence'] += selected_armour['defence']
 
             Print("\n[Old Merchant] May it protect you in every battle ahead!")
             game_stats['items_bought'] += 1
